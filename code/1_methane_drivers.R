@@ -92,24 +92,10 @@ ggplot()+
 
 #ggsave("figures/map_sites_months.png", plot = sites_months_map , width = 15)
 
-###  plot on the effect of slope
-p1 <- ggplot(concs_gis)+
-  geom_point(aes(x=slope_m_m, y=CH4mean))+
-  scale_y_continuous(limits=c(0,1000))+
-  theme_classic()
-
-p2 <-  ggplot(concs_gis)+
-  geom_point(aes(x=slope_m_m, y=CH4mean))+
-  scale_y_continuous(limits=c(0,100))+
-  scale_x_continuous(limits=c(0,0.1))+
-  theme_classic()
-
-p1 + inset_element(p2, left=0.3, bottom = 0.2, top=0.9, right = 0.9)
-
-#ggsave(file="figures/slope ch4.png")
 
 
-# Correlations with spatial explicit variables----
+
+## Correlations with spatial explicit variables----
 
 #Make the average for each site
 concs_gis_avg <- concs_gis  %>%
