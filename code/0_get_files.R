@@ -13,7 +13,7 @@ lapply(package_list, require, character.only = TRUE)
 
 
 
-# Download data files from goole drive ----
+# Download data files from google drive ----
 
 # Download the methane database
 drive_download(
@@ -24,4 +24,7 @@ drive_download(
 
 # We should add the other files here for the modelling
 
+
+
+#
 
