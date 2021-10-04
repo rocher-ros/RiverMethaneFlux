@@ -17,36 +17,37 @@ lapply(package_list, require, character.only = TRUE)
 
 dir.create("data/raw/grades")
 
-url = "http://hydrology.princeton.edu/data/mpan/GRADES/MERIT_Hydro_v00_Basins_v01/level_01/"
+url = "http://hydrology.princeton.edu/data/mpan/MERIT_Basins/MERIT_Hydro_v07_Basins_v01_bugfix1/pfaf_level_01/"
 #check that it is the right folder
 browseURL(url)
 
 #get the urls of the files
 files <- getHTMLLinks(url)
 
-files <- files[grepl("^pfaf.", files)]
+files <- files[grepl("^riv.", files)]
 
 
-#### Download GRADES river network to the local file. it takes over 1h. 
-if(file.exists(paste("data/raw/grades", files, sep="/")) == TRUE){
-  print("files already downloaded")
-  }
-  else
-    {
+#### Download GRADES river network to the local file. it takes over 2h. 
+if(all(file.exists(paste("data/raw/grades", files, sep="/"))) == TRUE){
+  print("files already downloaded") 
+  } else {
       #download them in a loop
       for(i in 1:length(files)){
-        download(url = paste(url, files[i], sep = "/"), 
-                 destfile=paste("data/raw/grades", files[i], sep="/"))
+        download.file(url = paste(url, files[i], sep = "/"), 
+                 destfile=paste("data/raw/grades", files[i], sep="/"), mode="wb")
+        # this took me a day to figure out. downloading the files with the default 
+        # mode="w" was corrupting the shapefiles! "wb" writes it in binary
       }
     }
 
 
 #get the files than end in .shp
-shape_files <- files[grepl(".shp$", files)] 
+shape_files <- paste("data/raw/grades", files[grepl(".shp$", files)], sep="/") 
 
 
-site <- here::here(paste("data/raw/grades", shape_files[11], sep="/")) %>% 
-  st_read()
+system.file(shape_files[15], package="sf")
+
+site <- read_sf("data/raw/grades/riv_pfaf_9_MERIT_Hydro_v07_Basins_v01_bugfix1.shp")
 
 
 
