@@ -1,6 +1,6 @@
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'downloader', 'RCurl', 'sf', 'XML', 'countrycode', 'leaflet', 'googledrive')
+package_list <- c('tidyverse', 'RCurl', 'sf', 'XML', 'countrycode', 'leaflet', 'googledrive')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -50,12 +50,18 @@ if(all(file.exists(paste("data/raw/grades", files, sep="/"))) == TRUE){
 
 ## Prepare the files for processing ----
 
+# Download the methane database
+drive_download(
+  "SCIENCE/PROJECTS/RiverMethaneFlux/methane/MethDB_tables_converted.rda",
+  path = "data/raw/MethDB_tables_converted.rda",
+  overwrite = TRUE
+)
 #load the methane DB 
 load(file.path("data", "raw", "MethDB_tables_converted.rda"))
 
 #select the sites, and make a new column to get the continent name. This will be the way to break the processing in pieces
 sites_meth <- gis_df %>% 
-  select(Site_Nid, lat=lat_new, lon=lon_new, elevation_m =z_m_combined, country=countries_sub) %>% 
+  dplyr::select(Site_Nid, lat=lat_new, lon=lon_new, elevation_m =z_m_combined, country=countries_sub) %>% 
   mutate(continent =  countrycode(sourcevar = country,
                                   origin = "country.name",
                                   destination = "continent"),
@@ -93,6 +99,8 @@ file.size(shapes_catchments)/1e+6
 africa <- read_sf(shapes_rivers[1]) %>% st_set_crs(4326)
 
 sites_in_africa <- sites_meth %>% filter(continent == "Africa")
+
+
 
 #to double check, plot 1000 of the sites randomly selected
 sample_n(africa, 1000) %>% 

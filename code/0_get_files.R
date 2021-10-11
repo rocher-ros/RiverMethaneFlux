@@ -1,6 +1,6 @@
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('googledrive')
+package_list <- c('googledrive', 'purrr')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -22,9 +22,15 @@ drive_download(
   overwrite = TRUE
 )
 
-# We should add the other files here for the modelling
+# download the grade attributes to the local copy
+grades_in_drive <- drive_ls("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes")
+
+#get the file paths for drive and locally
+names_in_drive <- paste("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes", grades_in_drive$name, sep="/") 
+names_destination <- paste("data/raw/gis/GRADES_attributes", grades_in_drive$name, sep="/") 
+
+#feed them through a map
+map2(names_in_drive, names_destination, drive_download)
 
 
-
-#
 
