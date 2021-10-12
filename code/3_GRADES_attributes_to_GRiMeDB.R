@@ -1,0 +1,278 @@
+# Load  and install packages ----
+# List of all packages needed
+package_list <- c('tidyverse', 'googledrive', 'lubridate'  )
+
+# Check if there are any packacges missing
+packages_missing <- setdiff(package_list, rownames(installed.packages()))
+
+# If we find a package missing, install them
+if(length(packages_missing) >= 1) install.packages(packages_missing) 
+
+# Now load all the packages
+lapply(package_list, require, character.only = TRUE)
+
+# Download needed files ----
+# download the grade attributes to the local copy 
+dir.create("data/raw/gis/GRADES_attributes") 
+grades_in_drive <- drive_ls("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes")
+#get the file paths for drive and locally
+names_in_drive <- paste("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes", grades_in_drive$name, sep="/") 
+names_destination <- paste("data/raw/gis/GRADES_attributes", grades_in_drive$name, sep="/") 
+
+#feed them through a map, if needed
+if(all(file.exists(names_destination)) == TRUE) {
+  print("files already downloaded")
+} else {
+  map2(names_in_drive, names_destination, drive_download)
+}
+
+## Download the GRiMe ----
+if(file.exists("data/raw/MethDB_tables_converted.rda") == TRUE) {
+  print("files already downloaded")
+} else {
+  drive_download(
+    "SCIENCE/PROJECTS/RiverMethaneFlux/methane/MethDB_tables_converted.rda",
+    path = "data/raw/MethDB_tables_converted.rda",
+    overwrite = TRUE
+  )
+}
+
+## Download the sites in GRiMe with the COMID's ----
+if(file.exists("data/processed/sites_meth_comid.csv") == TRUE) {
+  print("files already downloaded")
+} else {
+  drive_download("SCIENCE/PROJECTS/RiverMethaneFlux/methane/sites_meth_comid.csv",
+                 path = "data/processed/sites_meth_comid.csv" )
+}
+
+rm(list=ls())
+
+# Read files into R ----
+#get the names
+grades_attributes_files <- list.files("data/raw/gis/GRADES_attributes")
+
+#check the file sizes, in MB
+sum(file.size(paste("data/raw/gis/GRADES_attributes", grades_attributes_files, sep="/")))/1e+6 
+
+#I will combine each attribute into one file in R
+
+#get the string of unique attributes
+attributes <- word(grades_attributes_files,1,sep = "\\_") %>% unique()
+
+attributes
+
+## First read all attributes in GRADES ----
+annPP <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "annPP", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(annPP) <- c("COMID", "GPP_yr",   "NPP_yr")
+
+eleSlope <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "eleSlope", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(eleSlope) 
+
+gwTable <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "gwTable", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(gwTable)
+
+k <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "k", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(k) <- c("COMID", "k_jan", "k_feb", "k_mar", "k_apr", "k_may", "k_jun", "k_jul", "k_aug", "k_sep", "k_oct", "k_nov", "k_dec")
+
+monPP <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "monPP", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(monPP) <- c("COMID",  "gpp_jan", "npp_jan", "gpp_feb", "npp_feb", "gpp_mar", "npp_mar", "gpp_apr", "npp_apr", "gpp_may", "npp_may", "gpp_jun", 
+                     "npp_jun", "gpp_jul", "npp_jul", "gpp_aug", "npp_aug", "gpp_sep", "npp_sep", "gpp_oct", "npp_oct", "gpp_nov", "npp_nov", "gpp_dec", "npp_dec")
+
+monTemp <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "monTemp", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(monTemp) <- c("COMID", "temp_jan", "temp_feb", "temp_mar", "temp_apr", "temp_may", "temp_jun", "temp_jul", "temp_aug", "temp_sep", "temp_oct", "temp_nov", "temp_dec")
+
+popdens <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "popdens", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(popdens) <- c("COMID", "popdens_2000", "popdens_2005", "popdens_2010", "popdens_2015")
+
+prectemp <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "prectemp", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(prectemp) <- c("COMID", "temp_yr", "prec_yr", "prec_jan", "prec_feb", "prec_mar", "prec_apr", "prec_may", "prec_jun", "prec_jul", "prec_aug", "prec_sep", "prec_oct", "prec_nov", "prec_dec",
+                        "tavg_jan", "tavg_feb", "tavg_mar", "tavg_apr", "tavg_may", "tavg_jun", "tavg_jul", "tavg_aug", "tavg_sep", "tavg_oct", "tavg_nov", "tavg_dec")
+
+soilATT <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "soilATT", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(soilATT)
+
+sresp <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "sresp", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(sresp) <- c("COMID", "pRS_jan", "pRS_feb", "pRS_mar", "pRS_apr", "pRS_may", "pRS_jun", "pRS_jul", "pRS_aug", "pRS_sep", "pRS_oct", "pRS_nov", "pRS_dec", "pyearRA", "pyearRH", "pyearRS")
+
+uparea <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "uparea", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(uparea)
+
+wetland <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "wetland", full.names = TRUE), read_csv) %>% 
+  bind_rows()
+
+colnames(wetland)
+
+## Now get GRiMeDB ----
+load(file.path("data", "raw", "MethDB_tables_converted.rda"))
+
+sites_df <- sites_df %>% 
+  mutate(Channel_type = ifelse(is.na(Channel_type) == TRUE, "normal", Channel_type)) 
+
+grime_comids <- read_csv("data/processed/sites_meth_comid.csv")
+
+# Process all files ----
+## First clean the methDB for the useful sites ----
+# Steps done:
+# 1. remove aggregated sites
+# 2. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
+#    Thermogenically affected, Ditches
+grime_comids  %>% 
+  group_by(Site_Nid) %>% 
+  summarize(n=n()) %>%  
+  filter(n>1) %>% print(n=400)
+
+sites_clean <- sites_df %>% 
+  filter(`Aggregated?` == "No",
+         !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>% 
+  left_join(grime_comids, by="Site_Nid")
+
+## attach the COMID to the concentration df and keep useful variables 
+conc_df_comids <- conc_df %>% 
+  filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
+  left_join(sites_clean, by="Site_Nid") %>% 
+  select(Site_Nid, COMID, uparea2 =uparea, order, lat, lon, distance_snapped, slope_m_m, CH4mean, CO2mean,
+         date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  )
+
+#Now attach all the annual variables to each pair of site_obs
+grimeDB_attributes <- conc_df_comids %>% 
+  left_join(annPP, by="COMID") %>% 
+  left_join(eleSlope, by="COMID") %>% 
+  left_join(gwTable, by="COMID") %>% 
+  left_join(k, by="COMID") %>% 
+  left_join(monPP, by="COMID") %>% 
+  left_join(monTemp, by="COMID") %>% 
+  left_join(popdens, by="COMID") %>%
+  left_join(prectemp, by="COMID") %>%
+  left_join(soilATT, by ="COMID") %>% 
+  left_join(sresp, by ="COMID") %>% 
+  left_join(uparea, by ="COMID") %>% 
+  left_join(wetland, by ="COMID") 
+
+# Now we do the monthly resolved variables, needs some thinking.
+grimeDB_attributes_mon <- grimeDB_attributes %>% 
+  mutate( gw_month = case_when(month(date) == 1 ~ gw_jan,
+                             month(date) == 2 ~ gw_feb,
+                             month(date) == 3 ~ gw_mar,
+                             month(date) == 4 ~ gw_apr,
+                             month(date) == 5 ~ gw_may,
+                             month(date) == 6 ~ gw_jun,
+                             month(date) == 7 ~ gw_jul,
+                             month(date) == 8 ~ gw_aug,
+                             month(date) == 9 ~ gw_sep,
+                             month(date) == 10 ~ gw_oct,
+                             month(date) == 11 ~ gw_nov,
+                             month(date) == 12 ~ gw_dec),
+          k_month =  case_when(month(date) == 1 ~  k_jan,
+                               month(date) == 2 ~  k_feb,
+                               month(date) == 3 ~  k_mar,
+                               month(date) == 4 ~  k_apr,
+                               month(date) == 5 ~  k_may,
+                               month(date) == 6 ~  k_jun,
+                               month(date) == 7 ~  k_jul,
+                               month(date) == 8 ~  k_aug,
+                               month(date) == 9 ~  k_sep,
+                               month(date) == 10 ~ k_oct,
+                               month(date) == 11 ~ k_nov,
+                               month(date) == 12 ~ k_dec),
+          gpp_month = case_when(month(date) == 1 ~ gpp_jan,
+                               month(date) == 2 ~ gpp_feb,
+                               month(date) == 3 ~ gpp_mar,
+                               month(date) == 4 ~ gpp_apr,
+                               month(date) == 5 ~ gpp_may,
+                               month(date) == 6 ~ gpp_jun,
+                               month(date) == 7 ~ gpp_jul,
+                               month(date) == 8 ~ gpp_aug,
+                               month(date) == 9 ~ gpp_sep,
+                               month(date) == 10 ~ gpp_oct,
+                               month(date) == 11 ~ gpp_nov,
+                               month(date) == 12 ~ gpp_dec),
+          npp_month = case_when(month(date) == 1 ~ npp_jan,
+                                month(date) == 2 ~ npp_feb,
+                                month(date) == 3 ~ npp_mar,
+                                month(date) == 4 ~ npp_apr,
+                                month(date) == 5 ~ npp_may,
+                                month(date) == 6 ~ npp_jun,
+                                month(date) == 7 ~ npp_jul,
+                                month(date) == 8 ~ npp_aug,
+                                month(date) == 9 ~ npp_sep,
+                                month(date) == 10 ~ npp_oct,
+                                month(date) == 11 ~ npp_nov,
+                                month(date) == 12 ~ npp_dec),
+          temp_month = case_when(month(date) == 1 ~ temp_jan,
+                                month(date) == 2 ~ temp_feb,
+                                month(date) == 3 ~ temp_mar,
+                                month(date) == 4 ~ temp_apr,
+                                month(date) == 5 ~ temp_may,
+                                month(date) == 6 ~ temp_jun,
+                                month(date) == 7 ~ temp_jul,
+                                month(date) == 8 ~ temp_aug,
+                                month(date) == 9 ~ temp_sep,
+                                month(date) == 10 ~ temp_oct,
+                                month(date) == 11 ~ temp_nov,
+                                month(date) == 12 ~ temp_dec),
+          precip_month = case_when(month(date) == 1 ~ prec_jan,
+                                month(date) == 2 ~ prec_feb,
+                                month(date) == 3 ~ prec_mar,
+                                month(date) == 4 ~ prec_apr,
+                                month(date) == 5 ~ prec_may,
+                                month(date) == 6 ~ prec_jun,
+                                month(date) == 7 ~ prec_jul,
+                                month(date) == 8 ~ prec_aug,
+                                month(date) == 9 ~ prec_sep,
+                                month(date) == 10 ~ prec_oct,
+                                month(date) == 11 ~ prec_nov,
+                                month(date) == 12 ~ prec_dec),
+          tavg_month = case_when(month(date) == 1 ~ tavg_jan,
+                                month(date) == 2 ~ tavg_feb,
+                                month(date) == 3 ~ tavg_mar,
+                                month(date) == 4 ~ tavg_apr,
+                                month(date) == 5 ~ tavg_may,
+                                month(date) == 6 ~ tavg_jun,
+                                month(date) == 7 ~ tavg_jul,
+                                month(date) == 8 ~ tavg_aug,
+                                month(date) == 9 ~ tavg_sep,
+                                month(date) == 10 ~ tavg_oct,
+                                month(date) == 11 ~ tavg_nov,
+                                month(date) == 12 ~ tavg_dec),
+          sresp_month = case_when(month(date) == 1 ~ pRS_jan,
+                                month(date) == 2 ~ pRS_feb,
+                                month(date) == 3 ~ pRS_mar,
+                                month(date) == 4 ~ pRS_apr,
+                                month(date) == 5 ~ pRS_may,
+                                month(date) == 6 ~ pRS_jun,
+                                month(date) == 7 ~ pRS_jul,
+                                month(date) == 8 ~ pRS_aug,
+                                month(date) == 9 ~ pRS_sep,
+                                month(date) == 10 ~ pRS_oct,
+                                month(date) == 11 ~ pRS_nov,
+                                month(date) == 12 ~ pRS_dec) ) %>%
+  select(!ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")))
+
+# quickly check one site
+grimeDB_attributes_mon %>% filter(Site_Nid == "2597") %>% 
+  ggplot(aes(date, tavg_month))+
+  geom_point()
+
+write_csv(grimeDB_attributes_mon, "data/processed/grimeDB_concs_with_grade_attributes.csv")  

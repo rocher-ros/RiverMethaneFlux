@@ -1,6 +1,6 @@
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'leaflet', 'googledrive', 'ncdf4', 'raster', 'sf',  'tabularaster', 'tictoc')
+package_list <- c('tidyverse', 'googledrive', 'ncdf4', 'raster', 'sf',  'tabularaster', 'tictoc')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -13,21 +13,7 @@ lapply(package_list, require, character.only = TRUE)
 
 
 # Download needed files ----
-# download the grade attributes to the local copy 
-dir.create("data/raw/gis/GRADES_attributes") 
-grades_in_drive <- drive_ls("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes")
-#get the file paths for drive and locally
-names_in_drive <- paste("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes", grades_in_drive$name, sep="/") 
-names_destination <- paste("data/raw/gis/GRADES_attributes", grades_in_drive$name, sep="/") 
-
-#feed them through a map, if needed
-if(all(file.exists(names_destination)) == TRUE) {
-  print("files already downloaded")
-} else {
-  map2(names_in_drive, names_destination, drive_download)
-}
-
-# Also get the raster files of the new attributes such as  groundwater table, to join with grades
+#  get the raster files of the new attributes such as  groundwater table, to join with grades
 dir.create("data/raw/gis/Groundwater_table")
 gw_in_drive <- drive_ls("SCIENCE/PROJECTS/RiverMethaneFlux/gis/Groundwater_table")
 
@@ -40,25 +26,6 @@ if(all(file.exists(gw_destination)) == TRUE) {
   print("files already downloaded")
 } else {
   map2(gwpath_in_drive, gw_destination, drive_download)
-}
-
-## Download the GRiMe ----
-if(file.exists("data/raw/MethDB_tables_converted.rda") == TRUE) {
-  print("files already downloaded")
-} else {
-  drive_download(
-    "SCIENCE/PROJECTS/RiverMethaneFlux/methane/MethDB_tables_converted.rda",
-    path = "data/raw/MethDB_tables_converted.rda",
-    overwrite = TRUE
-  )
-}
-
-## Download the sites in GRiMe with the COMID's ----
-if(file.exists("data/processed/sites_meth_comid.csv") == TRUE) {
-  print("files already downloaded")
-} else {
-drive_download("SCIENCE/PROJECTS/RiverMethaneFlux/methane/sites_meth_comid.csv",
-             path = "data/processed/sites_meth_comid.csv" )
 }
 
 rm(list = ls())
@@ -116,7 +83,7 @@ africa_df <- africa_df %>%
   drop_na(COMID) %>% 
   dplyr::select(COMID, gw_jan:gw_dec)
 
-write_csv(africa_df, "gwTable_01.csv")
+write_csv(africa_df, "data/raw/gis/GRADES_attributes/gwTable_01.csv")
  
 rm(africa_df, africa, index, africa_gwstack)
 
@@ -170,7 +137,7 @@ europe_df <- europe_df %>%
   dplyr::select(COMID, gw_jan:gw_dec)
 
 #iceland is missing from the gw map
-write_csv(europe_df, "gwTable_02.csv")
+write_csv(europe_df, "data/raw/gis/GRADES_attributes/gwTable_02.csv")
 
 rm(europe, index, europe_gwstack)
 gc()
@@ -219,7 +186,7 @@ asiaN_df <- asiaN_df %>%
   drop_na(COMID) %>% 
   dplyr::select(COMID, gw_jan:gw_dec)
 
-write_csv(asiaN_df, "gwTable_03.csv")
+write_csv(asiaN_df, "data/raw/gis/GRADES_attributes/gwTable_03.csv")
 
 rm(asia_north, index, asiaN_gwstack)
 
@@ -268,7 +235,7 @@ asiaS_df <- asiaS_df %>%
   drop_na(COMID) %>% 
   dplyr::select(COMID, gw_jan:gw_dec)
 
-write_csv(asiaS_df, "gwTable_04.csv")
+write_csv(asiaS_df, "data/raw/gis/GRADES_attributes/gwTable_04.csv")
 
 rm(asia_south, index, asiaS_gwstack)
 
@@ -317,7 +284,7 @@ oceania_df <- oceania_df %>%
   drop_na(COMID) %>% 
   dplyr::select(COMID, gw_jan:gw_dec)
 
-write_csv(oceania_df, "gwTable_05.csv")
+write_csv(oceania_df, "data/raw/gis/GRADES_attributes/gwTable_05.csv")
 
 rm(oceania, index, oceania_gwstack, oceania_df)
 
@@ -365,7 +332,7 @@ south_america_df <- south_america_df %>%
   drop_na(COMID) %>% 
   dplyr::select(COMID, gw_jan:gw_dec)
 
-write_csv(south_america_df, "gwTable_06.csv")
+write_csv(south_america_df, "data/raw/gis/GRADES_attributes/gwTable_06.csv")
 
 rm(south_america_df, south_america, index, south_america_gwstack)
 
@@ -413,7 +380,7 @@ north_america_df <- north_america_df %>%
   drop_na(COMID) %>% 
   dplyr::select(COMID, gw_jan:gw_dec)
 
-write_csv(north_america_df, "gwTable_07.csv")
+write_csv(north_america_df, "data/raw/gis/GRADES_attributes/gwTable_07.csv")
 
 rm(north_america, index, north_america_gwstack)
 
@@ -462,7 +429,23 @@ north2_america_df <- north2_america_df %>%
   drop_na(COMID) %>% 
   dplyr::select(COMID, gw_jan:gw_dec)
 
-write_csv(north2_america_df, "gwTable_08.csv")
+write_csv(north2_america_df, "data/raw/gis/GRADES_attributes/gwTable_08.csv")
 
 rm(north2_america, index, north2_america_gwstack,north2_america_df)
+
+# Upload the processed files into google drive ----
+
+full_files <- list.files("data/raw/gis/GRADES_attributes",full.names = TRUE) 
+
+path_in_drive <- paste("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes", 
+                         list.files("data/raw/gis/GRADES_attributes"), sep="/") 
+
+gw_path_in_drive <-  path_in_drive[grepl("gwTable", path_in_drive)] 
+
+gw_to_upload <-  gw_destination[grepl("gwTable", gw_destination)] 
+
+
+
+map2(gw_to_upload, gw_path_in_drive, drive_upload)
+
 
