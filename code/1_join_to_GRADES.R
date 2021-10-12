@@ -291,7 +291,7 @@ leaflet() %>%
 
 rm(oceania)
 
-## #5 is Oceania ----
+## #5 is America ----
 # read the GRADES shapefile 
 south_america <- read_sf(shapes_rivers[6]) %>% st_set_crs(4326)
 north_america <- read_sf(shapes_rivers[7]) %>% st_set_crs(4326)

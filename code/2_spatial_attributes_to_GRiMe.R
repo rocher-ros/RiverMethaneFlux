@@ -1,6 +1,6 @@
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'leaflet', 'googledrive', 'ncdf4', 'raster', 'sf', 'exactextractr', 'foreach', 'parallel')
+package_list <- c('tidyverse', 'leaflet', 'googledrive', 'ncdf4', 'raster', 'sf',  'tabularaster', 'tictoc')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -11,10 +11,9 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 # Now load all the packages
 lapply(package_list, require, character.only = TRUE)
 
-#sites_meth_comid <- read_csv("data/processed/sites_meth_comid.csv")
-# Download the needed files from google drive  ----
 
-## download the grade attributes to the local copy ----
+# Download needed files ----
+# download the grade attributes to the local copy 
 dir.create("data/raw/gis/GRADES_attributes") 
 grades_in_drive <- drive_ls("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes")
 #get the file paths for drive and locally
@@ -54,7 +53,7 @@ if(file.exists("data/raw/MethDB_tables_converted.rda") == TRUE) {
   )
 }
 
-# Download the sites in GRiMe with the COMID's
+## Download the sites in GRiMe with the COMID's ----
 if(file.exists("data/processed/sites_meth_comid.csv") == TRUE) {
   print("files already downloaded")
 } else {
@@ -65,6 +64,7 @@ drive_download("SCIENCE/PROJECTS/RiverMethaneFlux/methane/sites_meth_comid.csv",
 rm(list = ls())
 
 # Join the new attributes to the main files ----
+
 #get the files than end in .shp, and separate them in catchments and networks
 files <- list.files("data/raw/grades")[grepl(".shp$", list.files("data/raw/grades"))]
 
@@ -77,101 +77,23 @@ gw_files <- list.files("data/raw/gis/Groundwater_table", full.names = TRUE)
 gw_files <- gw_files[grepl(".nc$", gw_files)]
 
 ## Start with #1, which is Africa ----
-# read the GRADES shapefile and the gwt file 
+# read the GRADES shapefile of catchments and the gwt file 
 africa <- read_sf(shapes_catchments[1]) %>% st_set_crs(4326)
 
-# open a netCDF file
-africa_gw <- nc_open(gw_files[1])
-
-print(africa_gw)
-
-
-get_avg_ncdf <- function(ncdf_file, shape_file){
-  extent_catch <- extent(shape_file)
-  
-  # get longitude and latitude
-  lon <- ncvar_get(ncdf_file,"lon")
-  nlon <- dim(lon)
-  
-  lat <- ncvar_get(ncdf_file,"lat")
-  nlat <- dim(lat)
-  
-  # create a bounding box to work with a subset
-  LonIdx <- which( ncdf_file$dim$lon$vals > extent_catch@xmin & 
-                     ncdf_file$dim$lon$vals < extent_catch@xmax)
-  LatIdx <- which( ncdf_file$dim$lat$vals >= extent_catch@ymin & 
-                     ncdf_file$dim$lat$vals < extent_catch@ymax)
-  
-  # read only the part we are intrested
-  cropped2 = list()
-  cropped2$x = ncvar_get(ncdf_file, "lon", start=c( LonIdx[1]), count=c(length(LonIdx)))
-  cropped2$y = ncvar_get(ncdf_file, "lat", start=c(LatIdx[1]), count=c(length(LatIdx)))
-  
-  
-  r<-list()
-  
-  for(i in 1:12){
-    cropped2$z =  ncvar_get(ncdf_file, "WTD", 
-                            start=c(LonIdx[1],LatIdx[1], i), 
-                            count=c(length(LonIdx),length(LatIdx), 1))
-    
-    r[i]<-raster(cropped2)
-  }
-  # create layer stack with time dimension
-  cropped2.r<-stack(r)
-  
-  #monthly[i] <-  raster::extract(x=cropped2.r, y=shape_file, fun = median)
-  monthly <-exact_extract(x=cropped2.r, y=shape_file, fun = "median")
-  
-  data.frame(
-    COMID = shape_file$COMID,
-    gwt_jan = monthly[1],
-    gwt_feb = monthly[2],
-    gwt_mar = monthly[3],
-    gwt_apr = monthly[4],
-    gwt_may = monthly[5],
-    gwt_jun = monthly[6],
-    gwt_jul = monthly[7],
-    gwt_aug = monthly[8],
-    gwt_sep = monthly[9],
-    gwt_oct = monthly[10],
-    gwt_nov = monthly[11],
-    gwt_dec = monthly[12]
-  )
-
-}
-
-
-
-tic()  
-f_out <- get_avg_ncdf(ncdf_file =africa_gw, shape_file= africa[1:2,])
-toc()
-
-tic()  
-x <- foreach(
-  i = 1:20, 
-  .combine = 'rbind'
-) %do% {
-  get_avg_ncdf(ncdf_file =africa_gw, shape_file= africa[i,])
-}
-toc()
-
-africa_sub <-africa[1:20,]
-
-tic() 
-dat <- get_avg_ncdf(ncdf_file =africa_gw, shape_file= africa_sub)
-toc()
-
-
-######
+# open a gw file into a stack of rasters, one for each month
 africa_gwstack <- stack(gw_files[1])
-# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
-index <- cellnumbers(raster::subset(africa_gwstack, 1), africa_sub)
 
+
+
+#### Using tabularastwer function "cellnumbers" sped up the calculataions in Africa from 8 days to 20 minutes...so much worth it
+# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
+tic("make index")
+index <- cellnumbers(raster::subset(africa_gwstack, 1), africa)
+toc()
 head(index)
 
-tic()
-aps <- index %>% 
+tic("do extraction")
+africa_df <- index %>% 
   mutate( gw_jan = raster::extract(africa_gwstack[[1]], cell_ ),
           gw_feb = raster::extract(africa_gwstack[[2]], cell_ ),
           gw_mar = raster::extract(africa_gwstack[[3]], cell_ ),
@@ -189,10 +111,358 @@ aps <- index %>%
   summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
 toc()
 
-africa_df <- aps %>% 
+africa_df <- africa_df %>% 
   mutate(COMID = africa$COMID[object_] ) %>% 
   drop_na(COMID) %>% 
   dplyr::select(COMID, gw_jan:gw_dec)
-  
 
+write_csv(africa_df, "gwTable_01.csv")
+ 
+rm(africa_df, africa, index, africa_gwstack)
+
+## Do #2, which is Europe ----
+# read the GRADES shapefile of catchments and the gwt file 
+europe <- read_sf(shapes_catchments[2]) %>% st_set_crs(4326)
+
+# open a gw file into a stack of rasters, one for each month
+europe_gwstack <- stack(gw_files[2])
+
+europe_gwstack <- crop(europe_gwstack, extent(europe))
+
+
+ggplot()+
+  geom_sf(data=sample_n(anti_join(europe,europe_df), 3000), color="blue")
+
+plot(europe_gwstack[[1]])
+
+
+#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
+# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
+tic("make index")
+index <- cellnumbers(raster::subset(europe_gwstack, 1), europe)
+toc()
+head(index)
+
+tic("do extraction")
+europe_df <- index %>% 
+  mutate( gw_jan = raster::extract(europe_gwstack[[1]], cell_ ),
+          gw_feb = raster::extract(europe_gwstack[[2]], cell_ ),
+          gw_mar = raster::extract(europe_gwstack[[3]], cell_ ),
+          gw_apr = raster::extract(europe_gwstack[[4]], cell_ ),
+          gw_may = raster::extract(europe_gwstack[[5]], cell_ ),
+          gw_jun = raster::extract(europe_gwstack[[6]], cell_ ),
+          gw_jul = raster::extract(europe_gwstack[[7]], cell_ ),
+          gw_aug = raster::extract(europe_gwstack[[8]], cell_ ),
+          gw_sep = raster::extract(europe_gwstack[[9]], cell_ ),
+          gw_oct = raster::extract(europe_gwstack[[10]], cell_ ),
+          gw_nov = raster::extract(europe_gwstack[[11]], cell_ ),
+          gw_dec = raster::extract(europe_gwstack[[12]], cell_ )
+  ) %>% 
+  group_by(object_) %>%
+  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+toc()
+#blip when done
+system("rundll32 user32.dll,MessageBeep -1")
+
+europe_df <- europe_df %>% 
+  mutate(COMID = europe$COMID[object_] ) %>% 
+  drop_na(COMID) %>% 
+  dplyr::select(COMID, gw_jan:gw_dec)
+
+#iceland is missing from the gw map
+write_csv(europe_df, "gwTable_02.csv")
+
+rm(europe, index, europe_gwstack)
+gc()
+
+## Do #3, which is Asia north ----
+# read the GRADES shapefile of catchments and the gwt file 
+asia_north <- read_sf(shapes_catchments[3]) %>% st_set_crs(4326)
+
+
+# open a gw file into a stack of rasters, one for each month
+asiaN_gwstack <- stack(gw_files[2])
+
+asiaN_gwstack <- crop(asiaN_gwstack, extent(asia_north))
+
+
+#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
+# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
+tic("make index")
+index <- cellnumbers(raster::subset(asiaN_gwstack, 1), asia_north)
+toc()
+head(index)
+
+tic("do extraction")
+asiaN_df <- index %>% 
+  mutate( gw_jan = raster::extract(asiaN_gwstack[[1]], cell_ ),
+          gw_feb = raster::extract(asiaN_gwstack[[2]], cell_ ),
+          gw_mar = raster::extract(asiaN_gwstack[[3]], cell_ ),
+          gw_apr = raster::extract(asiaN_gwstack[[4]], cell_ ),
+          gw_may = raster::extract(asiaN_gwstack[[5]], cell_ ),
+          gw_jun = raster::extract(asiaN_gwstack[[6]], cell_ ),
+          gw_jul = raster::extract(asiaN_gwstack[[7]], cell_ ),
+          gw_aug = raster::extract(asiaN_gwstack[[8]], cell_ ),
+          gw_sep = raster::extract(asiaN_gwstack[[9]], cell_ ),
+          gw_oct = raster::extract(asiaN_gwstack[[10]], cell_ ),
+          gw_nov = raster::extract(asiaN_gwstack[[11]], cell_ ),
+          gw_dec = raster::extract(asiaN_gwstack[[12]], cell_ )
+  ) %>% 
+  group_by(object_) %>%
+  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+toc()
+#blip when done
+system("rundll32 user32.dll,MessageBeep -1")
+
+asiaN_df <- asiaN_df %>% 
+  mutate(COMID = asia_north$COMID[object_] ) %>% 
+  drop_na(COMID) %>% 
+  dplyr::select(COMID, gw_jan:gw_dec)
+
+write_csv(asiaN_df, "gwTable_03.csv")
+
+rm(asia_north, index, asiaN_gwstack)
+
+
+## Do #4, which is Asia south ----
+# read the GRADES shapefile of catchments and the gwt file 
+asia_south <- read_sf(shapes_catchments[4]) %>% st_set_crs(4326)
+
+
+# open a gw file into a stack of rasters, one for each month
+asiaS_gwstack <- stack(gw_files[2])
+
+asiaS_gwstack <- crop(asiaS_gwstack, extent(asia_south))
+
+
+#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
+# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
+tic("make index")
+index <- cellnumbers(raster::subset(asiaS_gwstack, 1), asia_south)
+toc()
+head(index)
+
+tic("do extraction")
+asiaS_df <- index %>% 
+  mutate( gw_jan = raster::extract(asiaS_gwstack[[1]], cell_ ),
+          gw_feb = raster::extract(asiaS_gwstack[[2]], cell_ ),
+          gw_mar = raster::extract(asiaS_gwstack[[3]], cell_ ),
+          gw_apr = raster::extract(asiaS_gwstack[[4]], cell_ ),
+          gw_may = raster::extract(asiaS_gwstack[[5]], cell_ ),
+          gw_jun = raster::extract(asiaS_gwstack[[6]], cell_ ),
+          gw_jul = raster::extract(asiaS_gwstack[[7]], cell_ ),
+          gw_aug = raster::extract(asiaS_gwstack[[8]], cell_ ),
+          gw_sep = raster::extract(asiaS_gwstack[[9]], cell_ ),
+          gw_oct = raster::extract(asiaS_gwstack[[10]], cell_ ),
+          gw_nov = raster::extract(asiaS_gwstack[[11]], cell_ ),
+          gw_dec = raster::extract(asiaS_gwstack[[12]], cell_ )
+  ) %>% 
+  group_by(object_) %>%
+  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+toc()
+#blip when done
+system("rundll32 user32.dll,MessageBeep -1")
+
+asiaS_df <- asiaS_df %>% 
+  mutate(COMID = asia_south$COMID[object_] ) %>% 
+  drop_na(COMID) %>% 
+  dplyr::select(COMID, gw_jan:gw_dec)
+
+write_csv(asiaS_df, "gwTable_04.csv")
+
+rm(asia_south, index, asiaS_gwstack)
+
+
+## Do #5, which is Oceania ----
+# read the GRADES shapefile of catchments and the gwt file 
+oceania <- read_sf(shapes_catchments[5]) %>% st_set_crs(4326)
+
+
+# open a gw file into a stack of rasters, one for each month
+oceania_gwstack <- stack(gw_files[4])
+
+oceania_gwstack <- crop(oceania_gwstack, extent(oceania))
+
+
+#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
+# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
+tic("make index")
+index <- cellnumbers(raster::subset(oceania_gwstack, 1), oceania)
+toc()
+head(index)
+
+tic("do extraction")
+oceania_df <- index %>% 
+  mutate( gw_jan = raster::extract(oceania_gwstack[[1]], cell_ ),
+          gw_feb = raster::extract(oceania_gwstack[[2]], cell_ ),
+          gw_mar = raster::extract(oceania_gwstack[[3]], cell_ ),
+          gw_apr = raster::extract(oceania_gwstack[[4]], cell_ ),
+          gw_may = raster::extract(oceania_gwstack[[5]], cell_ ),
+          gw_jun = raster::extract(oceania_gwstack[[6]], cell_ ),
+          gw_jul = raster::extract(oceania_gwstack[[7]], cell_ ),
+          gw_aug = raster::extract(oceania_gwstack[[8]], cell_ ),
+          gw_sep = raster::extract(oceania_gwstack[[9]], cell_ ),
+          gw_oct = raster::extract(oceania_gwstack[[10]], cell_ ),
+          gw_nov = raster::extract(oceania_gwstack[[11]], cell_ ),
+          gw_dec = raster::extract(oceania_gwstack[[12]], cell_ )
+  ) %>% 
+  group_by(object_) %>%
+  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+toc()
+#blip when done
+system("rundll32 user32.dll,MessageBeep -1")
+
+oceania_df <- oceania_df %>% 
+  mutate(COMID = oceania$COMID[object_] ) %>% 
+  drop_na(COMID) %>% 
+  dplyr::select(COMID, gw_jan:gw_dec)
+
+write_csv(oceania_df, "gwTable_05.csv")
+
+rm(oceania, index, oceania_gwstack, oceania_df)
+
+## Do #6, which is south america ----
+# read the GRADES shapefile of catchments and the gwt file 
+south_america <- read_sf(shapes_catchments[6]) %>% st_set_crs(4326)
+
+
+# open a gw file into a stack of rasters, one for each month
+south_america_gwstack <- stack(gw_files[5])
+
+south_america_gwstack <- crop(south_america_gwstack, extent(south_america))
+
+
+#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
+# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
+tic("make index")
+index <- cellnumbers(raster::subset(south_america_gwstack, 1), south_america)
+toc()
+head(index)
+
+tic("do extraction")
+south_america_df <- index %>% 
+  mutate( gw_jan = raster::extract(south_america_gwstack[[1]], cell_ ),
+          gw_feb = raster::extract(south_america_gwstack[[2]], cell_ ),
+          gw_mar = raster::extract(south_america_gwstack[[3]], cell_ ),
+          gw_apr = raster::extract(south_america_gwstack[[4]], cell_ ),
+          gw_may = raster::extract(south_america_gwstack[[5]], cell_ ),
+          gw_jun = raster::extract(south_america_gwstack[[6]], cell_ ),
+          gw_jul = raster::extract(south_america_gwstack[[7]], cell_ ),
+          gw_aug = raster::extract(south_america_gwstack[[8]], cell_ ),
+          gw_sep = raster::extract(south_america_gwstack[[9]], cell_ ),
+          gw_oct = raster::extract(south_america_gwstack[[10]], cell_ ),
+          gw_nov = raster::extract(south_america_gwstack[[11]], cell_ ),
+          gw_dec = raster::extract(south_america_gwstack[[12]], cell_ )
+  ) %>% 
+  group_by(object_) %>%
+  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+toc()
+#blip when done
+system("rundll32 user32.dll,MessageBeep -1")
+
+south_america_df <- south_america_df %>% 
+  mutate(COMID = south_america$COMID[object_] ) %>% 
+  drop_na(COMID) %>% 
+  dplyr::select(COMID, gw_jan:gw_dec)
+
+write_csv(south_america_df, "gwTable_06.csv")
+
+rm(south_america_df, south_america, index, south_america_gwstack)
+
+## Do #7, which is north america 1----
+# read the GRADES shapefile of catchments and the gwt file 
+north_america <- read_sf(shapes_catchments[7]) %>% st_set_crs(4326)
+
+
+# open a gw file into a stack of rasters, one for each month
+north_america_gwstack <- stack(gw_files[3])
+
+north_america_gwstack <- crop(north_america_gwstack, extent(north_america))
+
+
+#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
+# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
+tic("make index")
+index <- cellnumbers(raster::subset(north_america_gwstack, 1), north_america)
+toc()
+head(index)
+
+tic("do extraction")
+north_america_df <- index %>% 
+  mutate( gw_jan = raster::extract(north_america_gwstack[[1]], cell_ ),
+          gw_feb = raster::extract(north_america_gwstack[[2]], cell_ ),
+          gw_mar = raster::extract(north_america_gwstack[[3]], cell_ ),
+          gw_apr = raster::extract(north_america_gwstack[[4]], cell_ ),
+          gw_may = raster::extract(north_america_gwstack[[5]], cell_ ),
+          gw_jun = raster::extract(north_america_gwstack[[6]], cell_ ),
+          gw_jul = raster::extract(north_america_gwstack[[7]], cell_ ),
+          gw_aug = raster::extract(north_america_gwstack[[8]], cell_ ),
+          gw_sep = raster::extract(north_america_gwstack[[9]], cell_ ),
+          gw_oct = raster::extract(north_america_gwstack[[10]], cell_ ),
+          gw_nov = raster::extract(north_america_gwstack[[11]], cell_ ),
+          gw_dec = raster::extract(north_america_gwstack[[12]], cell_ )
+  ) %>% 
+  group_by(object_) %>%
+  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+toc()
+#blip when done
+system("rundll32 user32.dll,MessageBeep -1")
+
+north_america_df <- north_america_df %>% 
+  mutate(COMID = north_america$COMID[object_] ) %>% 
+  drop_na(COMID) %>% 
+  dplyr::select(COMID, gw_jan:gw_dec)
+
+write_csv(north_america_df, "gwTable_07.csv")
+
+rm(north_america, index, north_america_gwstack)
+
+
+## Do #8, which is north america 2----
+# read the GRADES shapefile of catchments and the gwt file 
+north2_america <- read_sf(shapes_catchments[8]) %>% st_set_crs(4326)
+
+
+# open a gw file into a stack of rasters, one for each month
+north2_america_gwstack <- stack(gw_files[3])
+
+north2_america_gwstack <- crop(north2_america_gwstack, extent(north2_america))
+
+
+#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
+# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
+tic("make index")
+index <- cellnumbers(raster::subset(north2_america_gwstack, 1), north2_america)
+toc()
+head(index)
+
+tic("do extraction")
+north2_america_df <- index %>% 
+  mutate( gw_jan = raster::extract(north2_america_gwstack[[1]], cell_ ),
+          gw_feb = raster::extract(north2_america_gwstack[[2]], cell_ ),
+          gw_mar = raster::extract(north2_america_gwstack[[3]], cell_ ),
+          gw_apr = raster::extract(north2_america_gwstack[[4]], cell_ ),
+          gw_may = raster::extract(north2_america_gwstack[[5]], cell_ ),
+          gw_jun = raster::extract(north2_america_gwstack[[6]], cell_ ),
+          gw_jul = raster::extract(north2_america_gwstack[[7]], cell_ ),
+          gw_aug = raster::extract(north2_america_gwstack[[8]], cell_ ),
+          gw_sep = raster::extract(north2_america_gwstack[[9]], cell_ ),
+          gw_oct = raster::extract(north2_america_gwstack[[10]], cell_ ),
+          gw_nov = raster::extract(north2_america_gwstack[[11]], cell_ ),
+          gw_dec = raster::extract(north2_america_gwstack[[12]], cell_ )
+  ) %>% 
+  group_by(object_) %>%
+  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+toc()
+#blip when done
+system("rundll32 user32.dll,MessageBeep -1")
+
+north2_america_df <- north2_america_df %>% 
+  mutate(COMID = north2_america$COMID[object_] ) %>% 
+  drop_na(COMID) %>% 
+  dplyr::select(COMID, gw_jan:gw_dec)
+
+write_csv(north2_america_df, "gwTable_08.csv")
+
+rm(north2_america, index, north2_america_gwstack,north2_america_df)
 
