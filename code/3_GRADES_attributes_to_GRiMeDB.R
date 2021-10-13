@@ -73,7 +73,8 @@ eleSlope <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern =
 colnames(eleSlope) 
 
 gwTable <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "gwTable", full.names = TRUE), read_csv) %>% 
-  bind_rows()
+  bind_rows() %>% 
+  mutate(across(starts_with("gw"), abs))
 
 colnames(gwTable)
 
@@ -94,9 +95,11 @@ monTemp <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = 
 colnames(monTemp) <- c("COMID", "temp_jan", "temp_feb", "temp_mar", "temp_apr", "temp_may", "temp_jun", "temp_jul", "temp_aug", "temp_sep", "temp_oct", "temp_nov", "temp_dec")
 
 popdens <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "popdens", full.names = TRUE), read_csv) %>% 
-  bind_rows()
+  bind_rows() %>% 
+  mutate(  popdens= rowMeans(select(., `2000`:`2015`))) %>% 
+  select(COMID, popdens)
 
-colnames(popdens) <- c("COMID", "popdens_2000", "popdens_2005", "popdens_2010", "popdens_2015")
+colnames(popdens) 
 
 prectemp <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "prectemp", full.names = TRUE), read_csv) %>% 
   bind_rows()
@@ -130,7 +133,8 @@ load(file.path("data", "raw", "MethDB_tables_converted.rda"))
 sites_df <- sites_df %>% 
   mutate(Channel_type = ifelse(is.na(Channel_type) == TRUE, "normal", Channel_type)) 
 
-grime_comids <- read_csv("data/processed/sites_meth_comid.csv")
+grime_comids <- read_csv("data/processed/sites_meth_comid.csv") %>% 
+  mutate(Site_Nid= as.character(Site_Nid))
 
 # Process all files ----
 ## First clean the methDB for the useful sites ----
@@ -146,18 +150,22 @@ grime_comids  %>%
 sites_clean <- sites_df %>% 
   filter(`Aggregated?` == "No",
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>% 
-  left_join(grime_comids, by="Site_Nid")
+  left_join(grime_comids, by="Site_Nid") %>% 
+  drop_na(COMID)
+
+
 
 ## attach the COMID to the concentration df and keep useful variables 
 conc_df_comids <- conc_df %>% 
   filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
   left_join(sites_clean, by="Site_Nid") %>% 
-  select(Site_Nid, COMID, uparea2 =uparea, order, lat, lon, distance_snapped, slope_m_m, CH4mean, CO2mean,
-         date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  )
+  select(Site_Nid, COMID,  order, distance_snapped, slope_m_m, CH4mean, CO2mean,
+         date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  ) %>% 
+  mutate(CH4mean =ifelse(CH4mean < 0, 0.0001, CH4mean)) %>% 
+  drop_na(CH4mean)
 
-#Now attach all the annual variables to each pair of site_obs
-grimeDB_attributes <- conc_df_comids %>% 
-  left_join(annPP, by="COMID") %>% 
+#join all GRADES tables into one, and export it as one
+grades_attributes <-  annPP %>% 
   left_join(eleSlope, by="COMID") %>% 
   left_join(gwTable, by="COMID") %>% 
   left_join(k, by="COMID") %>% 
@@ -168,9 +176,20 @@ grimeDB_attributes <- conc_df_comids %>%
   left_join(soilATT, by ="COMID") %>% 
   left_join(sresp, by ="COMID") %>% 
   left_join(uparea, by ="COMID") %>% 
-  left_join(wetland, by ="COMID") 
+  left_join(wetland, by ="COMID") %>% 
+  mutate(across(where(is.numeric), ~na_if(., -Inf))) %>% 
+  mutate(across(where(is.numeric), ~na_if(., Inf)))
 
-# Now we do the monthly resolved variables, needs some thinking.
+write_csv(grades_attributes, "data/processed/grade_attributes.csv")  
+
+
+
+#Now attach all the annual variables to each pair of site_obs
+grimeDB_attributes <- conc_df_comids %>% 
+  left_join(grades_attributes, by="COMID")
+
+# Now we do the monthly resolved variables, needs some thinking...
+# Ok the way is to check the month of each observation and then match the value of a given variable
 grimeDB_attributes_mon <- grimeDB_attributes %>% 
   mutate( gw_month = case_when(month(date) == 1 ~ gw_jan,
                              month(date) == 2 ~ gw_feb,
@@ -232,18 +251,18 @@ grimeDB_attributes_mon <- grimeDB_attributes %>%
                                 month(date) == 10 ~ temp_oct,
                                 month(date) == 11 ~ temp_nov,
                                 month(date) == 12 ~ temp_dec),
-          precip_month = case_when(month(date) == 1 ~ prec_jan,
-                                month(date) == 2 ~ prec_feb,
-                                month(date) == 3 ~ prec_mar,
-                                month(date) == 4 ~ prec_apr,
-                                month(date) == 5 ~ prec_may,
-                                month(date) == 6 ~ prec_jun,
-                                month(date) == 7 ~ prec_jul,
-                                month(date) == 8 ~ prec_aug,
-                                month(date) == 9 ~ prec_sep,
-                                month(date) == 10 ~ prec_oct,
-                                month(date) == 11 ~ prec_nov,
-                                month(date) == 12 ~ prec_dec),
+          precip_month = case_when(month(date) == 1 ~ prec_jan/31*365,
+                                month(date) == 2 ~ prec_feb/28*365,
+                                month(date) == 3 ~ prec_mar/31*365,
+                                month(date) == 4 ~ prec_apr/30*365,
+                                month(date) == 5 ~ prec_may/31*365,
+                                month(date) == 6 ~ prec_jun/30*365,
+                                month(date) == 7 ~ prec_jul/31*365,
+                                month(date) == 8 ~ prec_aug/31*365,
+                                month(date) == 9 ~ prec_sep/30*365,
+                                month(date) == 10 ~ prec_oct/31*365,
+                                month(date) == 11 ~ prec_nov/30*365,
+                                month(date) == 12 ~ prec_dec/31*365),
           tavg_month = case_when(month(date) == 1 ~ tavg_jan,
                                 month(date) == 2 ~ tavg_feb,
                                 month(date) == 3 ~ tavg_mar,
@@ -256,23 +275,25 @@ grimeDB_attributes_mon <- grimeDB_attributes %>%
                                 month(date) == 10 ~ tavg_oct,
                                 month(date) == 11 ~ tavg_nov,
                                 month(date) == 12 ~ tavg_dec),
-          sresp_month = case_when(month(date) == 1 ~ pRS_jan,
-                                month(date) == 2 ~ pRS_feb,
-                                month(date) == 3 ~ pRS_mar,
-                                month(date) == 4 ~ pRS_apr,
-                                month(date) == 5 ~ pRS_may,
-                                month(date) == 6 ~ pRS_jun,
-                                month(date) == 7 ~ pRS_jul,
-                                month(date) == 8 ~ pRS_aug,
-                                month(date) == 9 ~ pRS_sep,
-                                month(date) == 10 ~ pRS_oct,
-                                month(date) == 11 ~ pRS_nov,
-                                month(date) == 12 ~ pRS_dec) ) %>%
+          sresp_month = case_when(month(date) == 1 ~ pRS_jan*365,
+                                month(date) == 2 ~ pRS_feb*365,
+                                month(date) == 3 ~ pRS_mar*365,
+                                month(date) == 4 ~ pRS_apr*365,
+                                month(date) == 5 ~ pRS_may*365,
+                                month(date) == 6 ~ pRS_jun*365,
+                                month(date) == 7 ~ pRS_jul*365,
+                                month(date) == 8 ~ pRS_aug*365,
+                                month(date) == 9 ~ pRS_sep*365,
+                                month(date) == 10 ~ pRS_oct*365,
+                                month(date) == 11 ~ pRS_nov*365,
+                                month(date) == 12 ~ pRS_dec*365) ) %>%
   select(!ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")))
 
 # quickly check one site
 grimeDB_attributes_mon %>% filter(Site_Nid == "2597") %>% 
-  ggplot(aes(date, tavg_month))+
+  ggplot(aes(date, gw_month))+
   geom_point()
 
-write_csv(grimeDB_attributes_mon, "data/processed/grimeDB_concs_with_grade_attributes.csv")  
+write_csv(grimeDB_attributes_mon, "data/processed/grimeDB_concs_with_grade_attributes2.csv")  
+
+

@@ -1,9 +1,12 @@
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive', 'ncdf4', 'raster', 'sf',  'tabularaster', 'tictoc')
+package_list <- c('tidyverse', 'googledrive', 'ncdf4', 'raster', 'sf',  'velox', 'tictoc')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
+
+#The fastest way for raster extractions is the package velox, need to be installed here:
+#remotes::install_github("hunzikp/velox")
 
 # If we find a package missing, install them
 if(length(packages_missing) >= 1) install.packages(packages_missing) 
@@ -50,42 +53,23 @@ africa <- read_sf(shapes_catchments[1]) %>% st_set_crs(4326)
 # open a gw file into a stack of rasters, one for each month
 africa_gwstack <- stack(gw_files[1])
 
+#the velox method is the fastest for this task
+vx <- velox(africa_gwstack, extent=extent(africa_gwstack), res=res(africa_gwstack),
+            crs=crs(africa_gwstack))
 
-
-#### Using tabularastwer function "cellnumbers" sped up the calculataions in Africa from 8 days to 20 minutes...so much worth it
-# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
-tic("make index")
-index <- cellnumbers(raster::subset(africa_gwstack, 1), africa)
-toc()
-head(index)
-
-tic("do extraction")
-africa_df <- index %>% 
-  mutate( gw_jan = raster::extract(africa_gwstack[[1]], cell_ ),
-          gw_feb = raster::extract(africa_gwstack[[2]], cell_ ),
-          gw_mar = raster::extract(africa_gwstack[[3]], cell_ ),
-          gw_apr = raster::extract(africa_gwstack[[4]], cell_ ),
-          gw_may = raster::extract(africa_gwstack[[5]], cell_ ),
-          gw_jun = raster::extract(africa_gwstack[[6]], cell_ ),
-          gw_jul = raster::extract(africa_gwstack[[7]], cell_ ),
-          gw_aug = raster::extract(africa_gwstack[[8]], cell_ ),
-          gw_sep = raster::extract(africa_gwstack[[9]], cell_ ),
-          gw_oct = raster::extract(africa_gwstack[[10]], cell_ ),
-          gw_nov = raster::extract(africa_gwstack[[11]], cell_ ),
-          gw_dec = raster::extract(africa_gwstack[[12]], cell_ )
-          ) %>% 
-  group_by(object_) %>%
-  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+tic()
+monthly <- vx$extract(sp=africa, fun=mean)
 toc()
 
-africa_df <- africa_df %>% 
-  mutate(COMID = africa$COMID[object_] ) %>% 
-  drop_na(COMID) %>% 
-  dplyr::select(COMID, gw_jan:gw_dec)
+africa_df <- as.data.frame(monthly)
+
+colnames(africa_df) <- c("gw_jan", "gw_feb", "gw_mar", "gw_apr", "gw_may", "gw_jun", "gw_jul", "gw_aug", "gw_sep", "gw_oct", "gw_nov", "gw_dec")
+
+africa_df$COMID <- africa$COMID
 
 write_csv(africa_df, "data/raw/gis/GRADES_attributes/gwTable_01.csv")
  
-rm(africa_df, africa, index, africa_gwstack)
+rm(africa_df, africa, vx, africa_gwstack, monthly)
 
 ## Do #2, which is Europe ----
 # read the GRADES shapefile of catchments and the gwt file 
@@ -97,50 +81,25 @@ europe_gwstack <- stack(gw_files[2])
 europe_gwstack <- crop(europe_gwstack, extent(europe))
 
 
-ggplot()+
-  geom_sf(data=sample_n(anti_join(europe,europe_df), 3000), color="blue")
+#the velox method is the fastest for this task
+vx <- velox(europe_gwstack, extent=extent(europe_gwstack), res=res(europe_gwstack),
+            crs=crs(europe_gwstack))
 
-plot(europe_gwstack[[1]])
-
-
-#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
-# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
-tic("make index")
-index <- cellnumbers(raster::subset(europe_gwstack, 1), europe)
+tic()
+monthly <- vx$extract(sp=europe, fun=mean)
 toc()
-head(index)
 
-tic("do extraction")
-europe_df <- index %>% 
-  mutate( gw_jan = raster::extract(europe_gwstack[[1]], cell_ ),
-          gw_feb = raster::extract(europe_gwstack[[2]], cell_ ),
-          gw_mar = raster::extract(europe_gwstack[[3]], cell_ ),
-          gw_apr = raster::extract(europe_gwstack[[4]], cell_ ),
-          gw_may = raster::extract(europe_gwstack[[5]], cell_ ),
-          gw_jun = raster::extract(europe_gwstack[[6]], cell_ ),
-          gw_jul = raster::extract(europe_gwstack[[7]], cell_ ),
-          gw_aug = raster::extract(europe_gwstack[[8]], cell_ ),
-          gw_sep = raster::extract(europe_gwstack[[9]], cell_ ),
-          gw_oct = raster::extract(europe_gwstack[[10]], cell_ ),
-          gw_nov = raster::extract(europe_gwstack[[11]], cell_ ),
-          gw_dec = raster::extract(europe_gwstack[[12]], cell_ )
-  ) %>% 
-  group_by(object_) %>%
-  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
-toc()
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
-
-europe_df <- europe_df %>% 
-  mutate(COMID = europe$COMID[object_] ) %>% 
-  drop_na(COMID) %>% 
-  dplyr::select(COMID, gw_jan:gw_dec)
+#turn into a df
+europe_df <- as.data.frame(monthly)
+colnames(europe_df) <- c("gw_jan", "gw_feb", "gw_mar", "gw_apr", "gw_may", "gw_jun", "gw_jul", "gw_aug", "gw_sep", "gw_oct", "gw_nov", "gw_dec")
+europe_df$COMID <- europe$COMID
 
 #iceland is missing from the gw map
 write_csv(europe_df, "data/raw/gis/GRADES_attributes/gwTable_02.csv")
 
-rm(europe, index, europe_gwstack)
-gc()
+rm(europe_df, europe, vx, europe_gwstack, monthly)
+
+
 
 ## Do #3, which is Asia north ----
 # read the GRADES shapefile of catchments and the gwt file 
@@ -153,42 +112,22 @@ asiaN_gwstack <- stack(gw_files[2])
 asiaN_gwstack <- crop(asiaN_gwstack, extent(asia_north))
 
 
-#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
-# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
-tic("make index")
-index <- cellnumbers(raster::subset(asiaN_gwstack, 1), asia_north)
-toc()
-head(index)
+#the velox method is the fastest for this task
+vx <- velox(asiaN_gwstack, extent=extent(asiaN_gwstack), res=res(asiaN_gwstack),
+            crs=crs(asiaN_gwstack))
 
-tic("do extraction")
-asiaN_df <- index %>% 
-  mutate( gw_jan = raster::extract(asiaN_gwstack[[1]], cell_ ),
-          gw_feb = raster::extract(asiaN_gwstack[[2]], cell_ ),
-          gw_mar = raster::extract(asiaN_gwstack[[3]], cell_ ),
-          gw_apr = raster::extract(asiaN_gwstack[[4]], cell_ ),
-          gw_may = raster::extract(asiaN_gwstack[[5]], cell_ ),
-          gw_jun = raster::extract(asiaN_gwstack[[6]], cell_ ),
-          gw_jul = raster::extract(asiaN_gwstack[[7]], cell_ ),
-          gw_aug = raster::extract(asiaN_gwstack[[8]], cell_ ),
-          gw_sep = raster::extract(asiaN_gwstack[[9]], cell_ ),
-          gw_oct = raster::extract(asiaN_gwstack[[10]], cell_ ),
-          gw_nov = raster::extract(asiaN_gwstack[[11]], cell_ ),
-          gw_dec = raster::extract(asiaN_gwstack[[12]], cell_ )
-  ) %>% 
-  group_by(object_) %>%
-  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+tic()
+monthly <- vx$extract(sp=asia_north, fun=mean)
 toc()
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
 
-asiaN_df <- asiaN_df %>% 
-  mutate(COMID = asia_north$COMID[object_] ) %>% 
-  drop_na(COMID) %>% 
-  dplyr::select(COMID, gw_jan:gw_dec)
+#turn into a df
+asiaN_df <- as.data.frame(monthly)
+colnames(asiaN_df) <- c("gw_jan", "gw_feb", "gw_mar", "gw_apr", "gw_may", "gw_jun", "gw_jul", "gw_aug", "gw_sep", "gw_oct", "gw_nov", "gw_dec")
+asiaN_df$COMID <- asia_north$COMID
 
 write_csv(asiaN_df, "data/raw/gis/GRADES_attributes/gwTable_03.csv")
 
-rm(asia_north, index, asiaN_gwstack)
+rm(asiaN_df, asia_north, vx, asiaN_gwstack, monthly)
 
 
 ## Do #4, which is Asia south ----
@@ -202,42 +141,22 @@ asiaS_gwstack <- stack(gw_files[2])
 asiaS_gwstack <- crop(asiaS_gwstack, extent(asia_south))
 
 
-#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
-# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
-tic("make index")
-index <- cellnumbers(raster::subset(asiaS_gwstack, 1), asia_south)
-toc()
-head(index)
+#the velox  is the fastest for this task
+tic()
+vx <- velox(asiaS_gwstack, extent=extent(asiaS_gwstack), res=res(asiaS_gwstack),
+            crs=crs(asiaS_gwstack))
 
-tic("do extraction")
-asiaS_df <- index %>% 
-  mutate( gw_jan = raster::extract(asiaS_gwstack[[1]], cell_ ),
-          gw_feb = raster::extract(asiaS_gwstack[[2]], cell_ ),
-          gw_mar = raster::extract(asiaS_gwstack[[3]], cell_ ),
-          gw_apr = raster::extract(asiaS_gwstack[[4]], cell_ ),
-          gw_may = raster::extract(asiaS_gwstack[[5]], cell_ ),
-          gw_jun = raster::extract(asiaS_gwstack[[6]], cell_ ),
-          gw_jul = raster::extract(asiaS_gwstack[[7]], cell_ ),
-          gw_aug = raster::extract(asiaS_gwstack[[8]], cell_ ),
-          gw_sep = raster::extract(asiaS_gwstack[[9]], cell_ ),
-          gw_oct = raster::extract(asiaS_gwstack[[10]], cell_ ),
-          gw_nov = raster::extract(asiaS_gwstack[[11]], cell_ ),
-          gw_dec = raster::extract(asiaS_gwstack[[12]], cell_ )
-  ) %>% 
-  group_by(object_) %>%
-  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+monthly <- vx$extract(sp=asia_south, fun=mean)
 toc()
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
 
-asiaS_df <- asiaS_df %>% 
-  mutate(COMID = asia_south$COMID[object_] ) %>% 
-  drop_na(COMID) %>% 
-  dplyr::select(COMID, gw_jan:gw_dec)
+#turn into a df
+asiaS_df <- as.data.frame(monthly)
+colnames(asiaS_df) <- c("gw_jan", "gw_feb", "gw_mar", "gw_apr", "gw_may", "gw_jun", "gw_jul", "gw_aug", "gw_sep", "gw_oct", "gw_nov", "gw_dec")
+asiaS_df$COMID <- asia_south$COMID
 
 write_csv(asiaS_df, "data/raw/gis/GRADES_attributes/gwTable_04.csv")
 
-rm(asia_south, index, asiaS_gwstack)
+rm(asiaS_df, asia_south, vx, asiaS_gwstack, monthly)
 
 
 ## Do #5, which is Oceania ----
@@ -251,42 +170,22 @@ oceania_gwstack <- stack(gw_files[4])
 oceania_gwstack <- crop(oceania_gwstack, extent(oceania))
 
 
-#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
-# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
-tic("make index")
-index <- cellnumbers(raster::subset(oceania_gwstack, 1), oceania)
-toc()
-head(index)
+#the velox  is the fastest for this task
+vx <- velox(oceania_gwstack, extent=extent(oceania_gwstack), res=res(oceania_gwstack),
+            crs=crs(oceania_gwstack))
 
-tic("do extraction")
-oceania_df <- index %>% 
-  mutate( gw_jan = raster::extract(oceania_gwstack[[1]], cell_ ),
-          gw_feb = raster::extract(oceania_gwstack[[2]], cell_ ),
-          gw_mar = raster::extract(oceania_gwstack[[3]], cell_ ),
-          gw_apr = raster::extract(oceania_gwstack[[4]], cell_ ),
-          gw_may = raster::extract(oceania_gwstack[[5]], cell_ ),
-          gw_jun = raster::extract(oceania_gwstack[[6]], cell_ ),
-          gw_jul = raster::extract(oceania_gwstack[[7]], cell_ ),
-          gw_aug = raster::extract(oceania_gwstack[[8]], cell_ ),
-          gw_sep = raster::extract(oceania_gwstack[[9]], cell_ ),
-          gw_oct = raster::extract(oceania_gwstack[[10]], cell_ ),
-          gw_nov = raster::extract(oceania_gwstack[[11]], cell_ ),
-          gw_dec = raster::extract(oceania_gwstack[[12]], cell_ )
-  ) %>% 
-  group_by(object_) %>%
-  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+tic()
+monthly <- vx$extract(sp=oceania, fun=mean)
 toc()
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
 
-oceania_df <- oceania_df %>% 
-  mutate(COMID = oceania$COMID[object_] ) %>% 
-  drop_na(COMID) %>% 
-  dplyr::select(COMID, gw_jan:gw_dec)
+#turn into a df
+oceania_df <- as.data.frame(monthly)
+colnames(oceania_df) <- c("gw_jan", "gw_feb", "gw_mar", "gw_apr", "gw_may", "gw_jun", "gw_jul", "gw_aug", "gw_sep", "gw_oct", "gw_nov", "gw_dec")
+oceania_df$COMID <- oceania$COMID
 
 write_csv(oceania_df, "data/raw/gis/GRADES_attributes/gwTable_05.csv")
 
-rm(oceania, index, oceania_gwstack, oceania_df)
+rm(oceania_df, oceania, vx, oceania_gwstack, monthly)
 
 ## Do #6, which is south america ----
 # read the GRADES shapefile of catchments and the gwt file 
@@ -299,42 +198,22 @@ south_america_gwstack <- stack(gw_files[5])
 south_america_gwstack <- crop(south_america_gwstack, extent(south_america))
 
 
-#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
-# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
-tic("make index")
-index <- cellnumbers(raster::subset(south_america_gwstack, 1), south_america)
-toc()
-head(index)
+#the velox  is the fastest for this task
+vx <- velox(south_america_gwstack, extent=extent(south_america_gwstack), res=res(south_america_gwstack),
+            crs=crs(south_america_gwstack))
 
-tic("do extraction")
-south_america_df <- index %>% 
-  mutate( gw_jan = raster::extract(south_america_gwstack[[1]], cell_ ),
-          gw_feb = raster::extract(south_america_gwstack[[2]], cell_ ),
-          gw_mar = raster::extract(south_america_gwstack[[3]], cell_ ),
-          gw_apr = raster::extract(south_america_gwstack[[4]], cell_ ),
-          gw_may = raster::extract(south_america_gwstack[[5]], cell_ ),
-          gw_jun = raster::extract(south_america_gwstack[[6]], cell_ ),
-          gw_jul = raster::extract(south_america_gwstack[[7]], cell_ ),
-          gw_aug = raster::extract(south_america_gwstack[[8]], cell_ ),
-          gw_sep = raster::extract(south_america_gwstack[[9]], cell_ ),
-          gw_oct = raster::extract(south_america_gwstack[[10]], cell_ ),
-          gw_nov = raster::extract(south_america_gwstack[[11]], cell_ ),
-          gw_dec = raster::extract(south_america_gwstack[[12]], cell_ )
-  ) %>% 
-  group_by(object_) %>%
-  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+tic()
+monthly <- vx$extract(sp=south_america, fun=mean)
 toc()
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
 
-south_america_df <- south_america_df %>% 
-  mutate(COMID = south_america$COMID[object_] ) %>% 
-  drop_na(COMID) %>% 
-  dplyr::select(COMID, gw_jan:gw_dec)
+#turn into a df
+south_america_df <- as.data.frame(monthly)
+colnames(south_america_df) <- c("gw_jan", "gw_feb", "gw_mar", "gw_apr", "gw_may", "gw_jun", "gw_jul", "gw_aug", "gw_sep", "gw_oct", "gw_nov", "gw_dec")
+south_america_df$COMID <- south_america$COMID
 
 write_csv(south_america_df, "data/raw/gis/GRADES_attributes/gwTable_06.csv")
 
-rm(south_america_df, south_america, index, south_america_gwstack)
+rm(south_america_df, south_america, vx, south_america_gwstack, monthly)
 
 ## Do #7, which is north america 1----
 # read the GRADES shapefile of catchments and the gwt file 
@@ -347,42 +226,22 @@ north_america_gwstack <- stack(gw_files[3])
 north_america_gwstack <- crop(north_america_gwstack, extent(north_america))
 
 
-#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
-# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
-tic("make index")
-index <- cellnumbers(raster::subset(north_america_gwstack, 1), north_america)
-toc()
-head(index)
+#the velox  is the fastest for this task
+vx <- velox(north_america_gwstack, extent=extent(north_america_gwstack), res=res(north_america_gwstack),
+            crs=crs(north_america_gwstack))
 
-tic("do extraction")
-north_america_df <- index %>% 
-  mutate( gw_jan = raster::extract(north_america_gwstack[[1]], cell_ ),
-          gw_feb = raster::extract(north_america_gwstack[[2]], cell_ ),
-          gw_mar = raster::extract(north_america_gwstack[[3]], cell_ ),
-          gw_apr = raster::extract(north_america_gwstack[[4]], cell_ ),
-          gw_may = raster::extract(north_america_gwstack[[5]], cell_ ),
-          gw_jun = raster::extract(north_america_gwstack[[6]], cell_ ),
-          gw_jul = raster::extract(north_america_gwstack[[7]], cell_ ),
-          gw_aug = raster::extract(north_america_gwstack[[8]], cell_ ),
-          gw_sep = raster::extract(north_america_gwstack[[9]], cell_ ),
-          gw_oct = raster::extract(north_america_gwstack[[10]], cell_ ),
-          gw_nov = raster::extract(north_america_gwstack[[11]], cell_ ),
-          gw_dec = raster::extract(north_america_gwstack[[12]], cell_ )
-  ) %>% 
-  group_by(object_) %>%
-  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+tic()
+monthly <- vx$extract(sp=north_america, fun=mean)
 toc()
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
 
-north_america_df <- north_america_df %>% 
-  mutate(COMID = north_america$COMID[object_] ) %>% 
-  drop_na(COMID) %>% 
-  dplyr::select(COMID, gw_jan:gw_dec)
+#turn into a df
+north_america_df <- as.data.frame(monthly)
+colnames(north_america_df) <- c("gw_jan", "gw_feb", "gw_mar", "gw_apr", "gw_may", "gw_jun", "gw_jul", "gw_aug", "gw_sep", "gw_oct", "gw_nov", "gw_dec")
+north_america_df$COMID <- north_america$COMID
 
 write_csv(north_america_df, "data/raw/gis/GRADES_attributes/gwTable_07.csv")
 
-rm(north_america, index, north_america_gwstack)
+rm(north_america_df, north_america, vx, north_america_gwstack, monthly)
 
 
 ## Do #8, which is north america 2----
@@ -396,42 +255,23 @@ north2_america_gwstack <- stack(gw_files[3])
 north2_america_gwstack <- crop(north2_america_gwstack, extent(north2_america))
 
 
-#### Using tabularaster function "cellnumbers" sped up the calculations in Africa from 8 days to 20 minutes...so much worth it
-# https://gis.stackexchange.com/questions/386241/fastest-way-to-perform-focal-operations-using-r
-tic("make index")
-index <- cellnumbers(raster::subset(north2_america_gwstack, 1), north2_america)
-toc()
-head(index)
+#the velox  is the fastest for this task
+vx <- velox(north2_america_gwstack, extent=extent(north2_america_gwstack), res=res(north2_america_gwstack),
+            crs=crs(north2_america_gwstack))
 
-tic("do extraction")
-north2_america_df <- index %>% 
-  mutate( gw_jan = raster::extract(north2_america_gwstack[[1]], cell_ ),
-          gw_feb = raster::extract(north2_america_gwstack[[2]], cell_ ),
-          gw_mar = raster::extract(north2_america_gwstack[[3]], cell_ ),
-          gw_apr = raster::extract(north2_america_gwstack[[4]], cell_ ),
-          gw_may = raster::extract(north2_america_gwstack[[5]], cell_ ),
-          gw_jun = raster::extract(north2_america_gwstack[[6]], cell_ ),
-          gw_jul = raster::extract(north2_america_gwstack[[7]], cell_ ),
-          gw_aug = raster::extract(north2_america_gwstack[[8]], cell_ ),
-          gw_sep = raster::extract(north2_america_gwstack[[9]], cell_ ),
-          gw_oct = raster::extract(north2_america_gwstack[[10]], cell_ ),
-          gw_nov = raster::extract(north2_america_gwstack[[11]], cell_ ),
-          gw_dec = raster::extract(north2_america_gwstack[[12]], cell_ )
-  ) %>% 
-  group_by(object_) %>%
-  summarise(across(gw_jan:gw_dec, ~ median(.x, na.rm = TRUE)))
+tic()
+monthly <- vx$extract(sp=north2_america, fun=mean)
 toc()
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
 
-north2_america_df <- north2_america_df %>% 
-  mutate(COMID = north2_america$COMID[object_] ) %>% 
-  drop_na(COMID) %>% 
-  dplyr::select(COMID, gw_jan:gw_dec)
+#turn into a df
+north2_america_df <- as.data.frame(monthly)
+colnames(north2_america_df) <- c("gw_jan", "gw_feb", "gw_mar", "gw_apr", "gw_may", "gw_jun", "gw_jul", "gw_aug", "gw_sep", "gw_oct", "gw_nov", "gw_dec")
+north2_america_df$COMID <- north2_america$COMID
 
 write_csv(north2_america_df, "data/raw/gis/GRADES_attributes/gwTable_08.csv")
 
-rm(north2_america, index, north2_america_gwstack,north2_america_df)
+rm(north2_america_df, north2_america, vx, north2_america_gwstack, monthly)
+
 
 # Upload the processed files into google drive ----
 
@@ -442,8 +282,7 @@ path_in_drive <- paste("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline at
 
 gw_path_in_drive <-  path_in_drive[grepl("gwTable", path_in_drive)] 
 
-gw_to_upload <-  gw_destination[grepl("gwTable", gw_destination)] 
-
+gw_to_upload <-  full_files[grepl("gwTable", full_files)] 
 
 
 map2(gw_to_upload, gw_path_in_drive, drive_upload)
