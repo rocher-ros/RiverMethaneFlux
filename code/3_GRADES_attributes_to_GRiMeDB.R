@@ -1,6 +1,6 @@
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive', 'lubridate'  )
+package_list <- c('tidyverse', 'googledrive', 'lubridate')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -123,7 +123,8 @@ uparea <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "
 colnames(uparea)
 
 wetland <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "wetland", full.names = TRUE), read_csv) %>% 
-  bind_rows()
+  bind_rows() %>% 
+  mutate( wetland = (wetland*100)+.001)
 
 colnames(wetland)
 
@@ -137,19 +138,13 @@ grime_comids <- read_csv("data/processed/sites_meth_comid.csv") %>%
   mutate(Site_Nid= as.character(Site_Nid))
 
 # Process all files ----
-## First clean the methDB for the useful sites ----
-# Steps done:
-# 1. remove aggregated sites
-# 2. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
-#    Thermogenically affected, Ditches
+#Check duplicated sites
 grime_comids  %>% 
   group_by(Site_Nid) %>% 
   summarize(n=n()) %>%  
   filter(n>1) %>% print(n=400)
 
 sites_clean <- sites_df %>% 
-  filter(`Aggregated?` == "No",
-         !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>% 
   left_join(grime_comids, by="Site_Nid") %>% 
   drop_na(COMID)
 
@@ -159,7 +154,7 @@ sites_clean <- sites_df %>%
 conc_df_comids <- conc_df %>% 
   filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
   left_join(sites_clean, by="Site_Nid") %>% 
-  select(Site_Nid, COMID,  order, distance_snapped, slope_m_m, CH4mean, CO2mean,
+  select(Site_Nid, `Aggregated?`, Channel_type, COMID,  order, distance_snapped, slope_m_m, CH4mean, CO2mean,
          date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  ) %>% 
   mutate(CH4mean =ifelse(CH4mean < 0, 0.0001, CH4mean)) %>% 
   drop_na(CH4mean)
@@ -182,6 +177,9 @@ grades_attributes <-  annPP %>%
 
 write_csv(grades_attributes, "data/processed/grade_attributes.csv")  
 
+drive_upload(media = "data/processed/grade_attributes.csv",
+             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attributes.csv",
+             overwrite = TRUE)
 
 
 #Now attach all the annual variables to each pair of site_obs
@@ -294,6 +292,10 @@ grimeDB_attributes_mon %>% filter(Site_Nid == "2597") %>%
   ggplot(aes(date, gw_month))+
   geom_point()
 
-write_csv(grimeDB_attributes_mon, "data/processed/grimeDB_concs_with_grade_attributes2.csv")  
+#save to file and upload to google drive
+write_csv(grimeDB_attributes_mon, "data/processed/grimeDB_concs_with_grade_attributes.csv")  
 
+drive_upload(media = "data/processed/grimeDB_concs_with_grade_attributes.csv",
+             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grimeDB_concs_with_grade_attributes.csv",
+             overwrite = TRUE)
 

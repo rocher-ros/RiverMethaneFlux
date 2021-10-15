@@ -1,6 +1,11 @@
+# Info ------
+# Script to model CH4 concentrations in rivers globally.
+# First part is to clean and transform data needed for the model
+
+
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'randomForest', 'nlme', 'googledrive' , 'corrr' )
+package_list <- c('tidyverse', 'randomForest', 'nlme', 'googledrive' , 'corrr', 'car', 'caret' )
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -12,18 +17,17 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 lapply(package_list, require, character.only = TRUE)
 
 # Add some custom functions ----
-
-extremes_to_NA <- function(x){
-  quantiles <- quantile( x, c(.025, .95 ), na.rm = TRUE )
-  x[ x < quantiles[1] ] <- NA
-  x[ x > quantiles[2] ] <- NA
+# Function to replace 0s to the lowest value, to avoid problems in log trans
+zero_to_min <- function(x){
+  min_nozero <- min( x[ x > 0 ], na.rm = TRUE )
+  x[ x <= 0 ] <- min_nozero
   x
 }
-extremes_to_NA(1:50)
+
 
 
 # Read files ----
-## Download the GRiMe ----
+## Download the GRiMeDB with GRADES 
 if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE) {
   print("files already downloaded")
 } else {
@@ -34,312 +38,150 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
   )
 }
 
-grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") 
+# Data filtering ----
+# First clean the methDB for the useful sites 
+# Steps done:
+# 1. remove aggregated sites
+# 2. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
+#    Thermogenically affected, Ditches
+grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
+  filter(`Aggregated?` == "No",
+         !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>% 
+  dplyr::select(where(is.numeric))
 
 colnames(grimeDB_attributes)
-summary(grimeDB_attributes$CH4mean)
 
-#histograms
+# Explore the raw data and process before the modelling
+
+#histograms of all variables, some will need logtansformation
 grimeDB_attributes %>% 
-  mutate(across(where(is.numeric), extremes_to_NA )) %>% 
-  select(where(is.numeric)) %>% 
-  pivot_longer(cols = everything(), names_to = "predictor", values_to = "value" ) %>% 
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value" ) %>% 
   ggplot(aes(value))+
   geom_histogram(bins = 80) +
   theme_classic()+
-  facet_wrap(~predictor, scales='free')
+  facet_wrap(~variable, scales='free')
+
+ggsave("figures/histograms_rawdata.png", width=16, height = 12)
+
+#check variable sindividually if needed
+grimeDB_attributes %>% 
+  select(val = gw_month) %>% 
+  ggplot(aes(val))+
+  geom_histogram(bins = 80) +
+  theme_classic()
 
 
-vars_to_log <- c('CH4mean','uparea','popdens','slop','S_CACO3','S_CASO4' ,'T_OC', 'T_CACO3', 'T_CASO4', 
-                 'T_ECE', 'k_month' )
+#remove some extreme values for some variables
+grimeDB_attributes <- grimeDB_attributes %>% 
+  mutate(CH4mean= ifelse(CH4mean > 500, NA, CH4mean),
+         popdens= ifelse(popdens > 4000, NA, popdens),
+         gw_month= ifelse(gw_month < .1, .1, gw_month))
 
+
+#histograms of all variables   
+grimeDB_attributes %>% 
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value" ) %>% 
+  ggplot(aes(value))+
+  geom_histogram(bins = 80) +
+  theme_classic()+
+  facet_wrap(~variable, scales='free')
+
+# we will log transform those to start with
+vars_to_log <- c('CH4mean','uparea','popdens','slop','S_CACO3','S_CASO4' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 
+                  'k_month', 'gw_month', 'wetland' )
+
+#dataset with some variables log transformed
 grimeDB_attr_trans <- grimeDB_attributes %>%
-  filter(distance_snapped < 1000) %>% 
-  mutate(across(where(is.numeric), extremes_to_NA )) %>% 
-  #group_by(COMID) %>% 
+  mutate(across(where(is.numeric), zero_to_min )) %>%
+  #filter(distance_snapped < 1000) %>%  #I was playing if excluding sites that has been snapped far away changes things
+  #group_by(Site_Nid) %>% # this was to check if grouping by sites (collapsing temporal variability) changes things. It does
   #summarise(across(everything(), mean, na.rm=TRUE)) %>% 
-  select( CH4mean,  GPP_yr:sresp_month, -area) %>% 
-  mutate(across(.cols=vars_to_log, log)) 
+  select( CH4mean,  GPP_yr:sresp_month, -area, -T_ECE, -S_ECE) %>% 
+  mutate(across(.cols=vars_to_log, log)) %>%  #log transform those variables
+  rename_with( ~str_c("Log", vars_to_log), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
-summary(grimeDB_attr_trans$CH4mean)
+#Do again some histograms with the log transformed variables
+grimeDB_attr_trans %>% 
+  pivot_longer(cols = everything(), names_to = "predictor", values_to = "value" ) %>% 
+  ggplot(aes(value))+
+    geom_histogram(bins = 80) +
+    theme_classic()+
+    facet_wrap(~predictor, scales='free')
 
-#pearson correlations for CH4
+summary(grimeDB_attr_trans$LogCH4mean)
+
+#pearson correlations for CH4 
 corr_ch4 <- grimeDB_attr_trans %>% 
   correlate() %>% 
-  focus(CH4mean)
+  focus(LogCH4mean)
 
-corr_ch4 %>% arrange(desc(abs(CH4mean))) %>% print(n=52)
-
-
-#correlations
 grimeDB_attr_trans %>% 
-  pivot_longer(GPP_yr:sresp_month, names_to = "predictor", values_to = "value" ) %>% 
-  ggplot(aes(value, CH4mean))+
+  correlate() %>% 
+  rplot(shape = 20, colors = c("red", "green"), print_cor = TRUE)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggsave("figures/correlations_predictors.png", width=16, height = 12)
+
+#check the coefficients in the console
+corr_ch4 %>% 
+  arrange(desc(abs(LogCH4mean))) %>% 
+  print(n=50)
+
+vars_for_plot <- corr_ch4 %>% 
+  arrange(desc(abs(LogCH4mean))) %>% 
+  mutate(predictor=fct_reorder(term, desc(abs(LogCH4mean)))) %>% 
+  select(-term)
+
+
+#scatter plots of all variables, sorted from highest to lower r. 
+# Showing a loess fit to capture potential nonlinearities that might be useful to assess
+ plot_correlations <- grimeDB_attr_trans %>% 
+  pivot_longer(-LogCH4mean, names_to = "predictor", values_to = "value" ) %>% 
+  mutate(predictor=fct_relevel(predictor, levels(vars_for_plot$predictor))) %>% 
+  ggplot(aes(value, LogCH4mean))+
   geom_hex(bins = 30) +
-  geom_smooth(method = "lm", se=FALSE, color="red3")+
+  geom_smooth(method = "loess", se=FALSE, color="red3")+
+  geom_text( data = vars_for_plot, 
+             mapping = aes(x = Inf, y = Inf, label = paste("r=",round(LogCH4mean,2))), hjust   = 3.5, vjust   = 1.5, color="red")+
   theme_classic()+
   scale_fill_continuous(type = "viridis", trans = "log10")+
   facet_wrap(~predictor, scales='free')
 
+ 
+ggsave(filename= "figures/correlations.png", plot=plot_correlations, width = 18, height = 12)
+
+# Start the modelling ----
+# Select useful variables for the model 
+cols_to_include <- c('LogCH4mean', 'elev', 'S_SAND', 'LogT_OC', 'Logslop', 'Loggw_month', 'npp_month','gpp_month', 'S_ESP', 'pyearRS',
+                     'precip_month', 'sresp_month', 'temp_month', 'Logpopdens', 'Logwetland', 'temp_yr', 'prec_yr' , 'Loguparea', 'GPP_yr')
+
+#check correlations between them
+grimeDB_attr_trans %>% 
+  select( cols_to_include) %>%
+  correlate() %>% 
+  rplot(shape = 20, colors = c("red", "green"), print_cor = TRUE)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+#select the potentially useful variables
+data_for_model <-  grimeDB_attr_trans %>% 
+  select(cols_to_include) %>% 
+  drop_na()
 
 
-####histograms for  predictors####
-cols_to_include<-c('lnCO2','area','popdens','tavg_00','prec_00','GPP_00','NPP_00',
-                   'AR_ann','HR_ann','SR_00','wetland','elev','slop','SGRAVEL',
-                   'SSAND','SSILT','SCLAY','SDENSITY','SOC','SpH','SCEC','SBS',
-                   'STEB','SCACO3','SCASO4','SSODICITY','SCONDUCTIVITY')
-grimeDB_attributes2<-ds[,which(names(ds) %in% cols_to_include)]
-grimeDB_attributes2<-grimeDB_attributes2%>%gather(key='predictor',value=value)
-grimeDB_attributes2<-grimeDB_attributes2[!is.na(grimeDB_attributes2$value),]
-
-#rm extreme values
-grimeDB_attributes2<-grimeDB_attributes2[!(grimeDB_attributes2$predictor=='SpH'&grimeDB_attributes2$value<quantile(ds$SpH,0.01,na.rm=TRUE)),] #rm SpH<3.7
-grimeDB_attributes2<-grimeDB_attributes2[!(grimeDB_attributes2$predictor=='SDENSITY'&grimeDB_attributes2$value<1),] #rm SDENSITY<1
-grimeDB_attributes2<-grimeDB_attributes2[!(grimeDB_attributes2$predictor=='SSODICITY'&grimeDB_attributes2$value>5),] #rm SSODICITY>5
-grimeDB_attributes2<-grimeDB_attributes2[!(grimeDB_attributes2$predictor=='SCONDUCTIVITY'&grimeDB_attributes2$value>0.3),] #rm SCONDUCTIVITY>0.3
-
-#format predictors
-grimeDB_attributes2$predictor<-
-  factor(grimeDB_attributes2$predictor,
-         levels=c('lnCO2','tavg_00','prec_00',
-                  'GPP_00','NPP_00','SR_00','AR_ann','HR_ann',
-                  'area','slop','elev','wetland','popdens',
-                  'SGRAVEL','SSAND','SSILT','SCLAY','SDENSITY',
-                  'SOC','SpH','SCEC','SBS','STEB','SCACO3','SCASO4',
-                  'SSODICITY','SCONDUCTIVITY'),
-         labels = c('Ln CO2','Temperature (°C)','Precipitation (mm/yr)',
-                    'GPP','NPP','Soil resp.','Autotrophic soil resp.','Heterotrophic soil resp.',
-                    'Ln Watershed area (km2)','Ln Slope (unitless)','Ln Elevation (m)','Wetland (%)','Ln pop. dens. (people/km2)',
-                    'Soil gravel (%v)','Soil sand (%w)','Soil silt (%w)','Soil clay (%w)','Soil density (kg/m3)',
-                    'Ln SOC (%w)','Soil pH','Ln Soil CEC (cmol/kg)','Base saturation (%)','Ln Exch. bases (cmol/kg)',
-                    'Ln Calcium carbonate (%w)','Ln Soil gypsum (%w)',
-                    'Soil sodicity (%)','Soil conductivity (dS/m)'))
-
-#histograms
-grimeDB_attributes2%>% ggplot(aes(value))+
-  geom_histogram(bins=50)+
-  theme_classic()+
-  theme(
-    axis.title.x=element_blank(),
-    panel.border=element_rect(colour="black",fill=NA,size=1),
-    strip.background=element_blank(),
-    strip.text=element_text(size=12,color='red')
-  )+
-  facet_wrap(.~predictor,scales='free')
-# ggsave(paste0(dir,'/output/figure/co2/hist_pred_mon.png'),
-#        width=30, height=20, units='cm')
-
-
-####scatter plots####
-cols_to_include<-c('lnCO2','tavg_00','prec_00','GPP_00','NPP_00','SR_00',
-                   'AR_ann','HR_ann','wetland','popdens','area','slop','elev','SGRAVEL',
-                   'SSAND','SSILT','SCLAY','SDENSITY','SOC','SpH','SCEC',
-                   'SBS','STEB','SCACO3','SCASO4','SSODICITY','SCONDUCTIVITY')
-
-grimeDB_attributes2<-ds[ds$popdens<log(300),cols_to_include]%>%
-  gather(key='predictor',value=value,-lnCO2)
-grimeDB_attributes2<-grimeDB_attributes2[!(is.na(grimeDB_attributes2$value)),]
-grimeDB_attributes2<-grimeDB_attributes2[!(is.infinite(grimeDB_attributes2$value)),]
-#rm extreme values
-grimeDB_attributes2<-grimeDB_attributes2[!(grimeDB_attributes2$predictor=='SpH'&grimeDB_attributes2$value<3.7),] #rm SpH<3.7
-grimeDB_attributes2<-grimeDB_attributes2[!(grimeDB_attributes2$predictor=='SDENSITY'&grimeDB_attributes2$value<1),] #rm SDENSITY<1
-grimeDB_attributes2<-grimeDB_attributes2[!(grimeDB_attributes2$predictor=='SSODICITY'&grimeDB_attributes2$value>5),] #rm SSODICITY>5
-grimeDB_attributes2<-grimeDB_attributes2[!(grimeDB_attributes2$predictor=='SCONDUCTIVITY'&grimeDB_attributes2$value>0.3),] #rm SCONDUCTIVITY>0.3
-
-grimeDB_attributes2$predictor<-
-  factor(grimeDB_attributes2$predictor,
-         levels=c('tavg_00','prec_00',
-                  'GPP_00','NPP_00','SR_00','AR_ann','HR_ann',
-                  'area','slop','elev','wetland','popdens',
-                  'SGRAVEL','SSAND','SSILT','SCLAY','SDENSITY',
-                  'SOC','SpH','SCEC','SBS','STEB','SCACO3','SCASO4',
-                  'SSODICITY','SCONDUCTIVITY'),
-         labels = c('Temperature (°C)','Precipitation (mm/yr)',
-                    'GPP','NPP','Soil resp.','Autotrophic soil resp.','Heterotrophic soil resp.',
-                    'Ln Watershed area (km2)','Ln Slope (unitless)','Ln Elevation (m)','Wetland (%)','Ln Pop dens. (people/km)',
-                    'Soil gravel (%v)','Soil sand (%w)','Soil silt (%w)','Soil clay (%w)','Soil density (kg/m3)',
-                    'Ln SOC (%w)','Soil pH','Ln Soil CEC (cmol/kg)','Base saturation (%)','Ln Soil TEB (cmol/kg)',
-                    'Ln Calcium carbonate (%w)','Ln Soil gypsum (%w)',
-                    'Soil sodiciy (%)','Soil conductivity (dS/m)'))
-
-lm_r2<-
-  function(predictor){
-    fit=lm(lnCO2~value,grimeDB_attributes2[(grimeDB_attributes2$predictor==predictor)&(!is.na(grimeDB_attributes2$predictor)),])
-    fitsum<-summary(fit)
-    r2=fitsum$adj.r.squared
-    return(r2)
-  }
-
-pltText<-data.frame(R2=matrix(NA,26,1))
-for(i in 1:26){
-  print(i)
-  r2=lm_r2(unique(grimeDB_attributes2$predictor)[i])
-  pltText[i,c('predictor')]<-unique(grimeDB_attributes2$predictor)[i]
-  pltText[i,c('R2')]<-round(r2,2)
-  pltText[i,c('R2_Label')]<-
-    as.character(as.expression(substitute(R^2*' = '*Rsqr, list(Rsqr=round(r2,2)))))
-}
-
-grimeDB_attributes2%>%
-  ggplot(aes(value,lnCO2))+
-  geom_point(alpha=0.2,size=2)+
-  geom_smooth(method=lm)+
-  scale_y_continuous(limits=c(3,10),breaks=seq(4,10,by=2))+
-  labs(y=expression('Ln '*CO[2]*' ('*mu*'atm)'))+
-  geom_label(data=pltText,
-             mapping=aes(x=Inf,y=3.5,label=R2_Label),
-             hjust=1.2, parse=TRUE)+
-  theme_bw()+
-  theme(axis.title.x=element_blank(),
-        panel.border=element_rect(colour = "black",fill=NA,size=1),
-        strip.background=element_blank(),
-        strip.text=element_text(size=12,color='red'))+
-  facet_wrap(.~predictor,ncol=5,scales='free_x')
-# ggsave(paste0(dir,'/output/figure/co2/linearRegressions_monMean.jpg'),
-#        width=30,height=36,units='cm',device='jpeg')
-
-
-####step-wise regression####
+## Step-wise regression ----
 #1
-ds[is.infinite(ds$popdens),]$popdens<-(-15)
-m_min<-lm(lnCO2~1,data=ds)
-m_max<-lm(lnCO2~tavg_00+prec_00+GPP_00+NPP_00+SR_00+
-            slop+elev+wetland+popdens+
-            SpH+SBS,data=ds)
-m_red<-step(m_max,scope=c(upper=m_max,lower=m_min),
-            trace=1)
+m_min <- lm(LogCH4mean ~ 1, data = data_for_model)
+m_max <-lm(
+    LogCH4mean ~ elev + S_SAND + LogT_OC + Logslop + Loggw_month + npp_month +
+      gpp_month + S_ESP + GPP_yr + pyearRS + precip_month + sresp_month + temp_month +
+      Logpopdens + Logwetland + temp_yr + prec_yr,
+    data = data_for_model )
+m_red <- step(m_max,
+              scope = c(upper = m_max, lower = m_min),
+              trace = 1)
 summary(m_red) #0.4237
+
 vif(m_red)
 print(paste("AIC =",round(AIC(m_red),0)))
 print(paste("N =",length(m_red$residuals)))
 
-#2
-m_min<-lm(lnCO2~1,data=ds)
-m_max<-lm(lnCO2~tavg_00+prec_00+SR_00+
-            slop+elev+wetland+popdens+
-            SpH+SBS,data=ds)
-m_red<-step(m_max,scope=c(upper=m_max,lower=m_min),
-            trace=1)
-summary(m_red) #0.4192
-vif(m_red)
-print(paste("AIC =",round(AIC(m_red),0)))
-
-#3
-m_min<-lm(lnCO2~1,data=ds)
-m_max<-lm(lnCO2~tavg_00+prec_00+SR_00+
-            slop+elev+wetland+popdens+
-            SpH,data=ds)
-m_red<-step(m_max,scope=c(upper=m_max,lower=m_min),
-            trace=1)
-summary(m_red) #0.4191
-vif(m_red)
-print(paste("AIC =",round(AIC(m_red),0)))
-
-#4
-m_min<-lm(lnCO2~1,data=ds)
-m_max<-lm(lnCO2~prec_00+SR_00+
-            slop+elev+wetland+popdens+
-            SpH,data=ds)
-m_red<-step(m_max,scope=c(upper=m_max,lower=m_min),
-            trace=1)
-summary(m_red) #0.4071
-vif(m_red)
-print(paste("AIC =",round(AIC(m_red),0)))
-
-####lm model validation####
-realpred<-
-  data.frame(modelvalue=m_red[["fitted.values"]],
-             modelres=m_red[["residuals"]],
-             realvalue=m_red[["model"]][["lnCO2"]],
-             soilResp=m_red[["model"]][["SR_00"]],
-             slop=m_red[["model"]][["slop"]],
-             elev=m_red[["model"]][["elev"]],
-             wetland=m_red[["model"]][["wetland"]],
-             SpH=m_red[["model"]][["SpH"]],
-             ds[!(1:5910%in%unname(unclass(m_red$na.action))), 
-                c('siteNo','SO','Lat','area','popdens','tavg_ann','prec_ann','GPP','NPP','AR_ann','HR_ann','SGRAVEL', 'SSAND','SBS')])
-
-summary(lm(modelvalue~realvalue,data=realpred))#0.4075
-
-#predictors versus residuals
-realpredv<-
-  realpred[,c('modelres','soilResp','slop','elev','wetland','SpH')]%>%
-  gather(key=predictor,value=value,-modelres)
-
-realpredv$predictor<-
-  factor(realpredv$predictor,
-         levels=c('soilResp','slop','elev','wetland','SpH'),
-         labels=c('Soil resp.','Ln Slope (unitless)',
-                  'Ln Elevation (m)', 'Wetland (%)','Soil pH'))
-realpredv<-realpredv[!(realpredv$predictor=='Soil pH' & realpredv$value<4),]
-
-realpredv%>%
-  ggplot(aes(value,modelres))+
-  geom_point(alpha=0.4,size=1)+
-  geom_hline(yintercept=0,color='blue')+
-  labs(y=expression('Residuals'))+
-  theme_classic()+
-  theme(axis.title.x=element_blank(),
-        panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
-  facet_wrap(.~predictor,ncol=3,scales='free_x')
-# ggsave(paste0(dir,'/output/figure/co2/residual_predictors_mon.png'),
-#        width=24,height=12,units='cm',device='png')
-
-#residuals versus non-predictors
-realpredv<-
-  realpred[,c('modelres','Lat','area','popdens','tavg_ann','prec_ann','GPP','NPP',
-              'AR_ann','HR_ann','SGRAVEL','SSAND','SBS')]
-# realpredv$popdens<-log(realpredv$popdens)
-realpredv<-realpredv%>%gather(key=predictor,value=value,-modelres)
-
-realpredv$predictor<-
-  factor(realpredv$predictor,
-         levels=c('Lat','area','popdens','tavg_ann','prec_ann','GPP','NPP',
-                  'AR_ann','HR_ann','SGRAVEL','SSAND','SBS'),
-         labels=c('Latitude','Watershed area','Pop density','Temperature','Precipitation','GPP','NPP',
-                  'Autotrophic resp.', 'Heterotrophic resp.',
-                  'Soil gravel (%v)','Soil sand (%w)', 'Soil base saturation'))
-
-realpredv%>%
-  ggplot(aes(value,modelres))+
-  geom_point(alpha=0.4,size=1)+
-  geom_hline(yintercept=0,color='blue')+
-  labs(y=expression('Residuals'))+
-  theme_classic()+
-  theme(axis.title.x=element_blank(),
-        panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
-  facet_wrap(.~predictor,ncol=3,scales='free_x')
-# ggsave(paste0(dir,'/output/figure/co2/residual_non-predictors_mon.png'),
-#        width=24,height=24,units='cm',device='png')
-
-####Random Forest Model####
-set.seed(0)
-sa<-sample.split(1:5910,SplitRatio=0.75)
-train<-subset(ds,sa)
-test<-subset(ds,!sa)
-
-#contruct the model
-rfmod<-randomForest(lnCO2~tavg_00+prec_00+GPP_00+NPP_00+SR_00+area+
-                      slop+elev+wetland+popdens+
-                      SGRAVEL+SSAND+SOC+SpH+SBS,data=train,importance=TRUE,na.action=na.omit)
-
-#model predictors importance
-odr<-order(-rfmod$importance[,1])
-importRF<-data.frame(rfmod$importance[odr,1])
-importRF$pred<-row.names(importRF)
-row.names(importRF)<-NULL
-names(importRF)[1]<-'Import'
-importRF$pred<-
-  factor(importRF$pred,
-         levels=c('slop','tavg_00','SR_00','elev','SpH','GPP_00',
-                  'prec_00','NPP_00','SBS','SOC','popdens','SGRAVEL','area','SSAND','wetland'),
-         labels=c('Slope','Temperature','Soil resp.','Elevation','Soil pH','GPP','Precipitation','NPP',
-                  'Soil base saturation','SOC','Pop. dens.','Soil gravel',
-                  'Watershed area','Soil sand','Wetland'))
-
-importRF%>%ggplot(aes(x=pred,weight=Import))+
-  geom_bar(fill='grey70')+
-  labs(x='',y='Predictor importance')+
-  theme_classic()+
-  theme(panel.border=element_rect(fill=NA,size=1),
-        axis.text.x=element_text(angle=90))
