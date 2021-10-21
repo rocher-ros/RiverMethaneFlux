@@ -5,7 +5,7 @@
 
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'randomForest', 'nlme', 'googledrive' , 'corrr', 'car', 'caret' )
+package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -17,12 +17,6 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 lapply(package_list, require, character.only = TRUE)
 
 # Add some custom functions ----
-# Function to replace 0s to the lowest value, to avoid problems in log trans
-zero_to_min <- function(x){
-  min_nozero <- min( x[ x > 0 ], na.rm = TRUE )
-  x[ x <= 0 ] <- min_nozero
-  x
-}
 
 
 
@@ -46,15 +40,17 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 #    Thermogenically affected, Ditches
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
   filter(`Aggregated?` == "No",
-         !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>% 
-  dplyr::select(where(is.numeric))
+         !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
+  mutate(month=month(date), year= year(date)) %>% 
+  select(-c(Channel_type, `Aggregated?`, date_end, date)) 
+
 
 colnames(grimeDB_attributes)
 
 # Explore the raw data and process before the modelling
 
 #histograms of all variables, some will need logtansformation
-grimeDB_attributes %>% 
+grimeDB_attributes %>%
   pivot_longer(cols = everything(), names_to = "variable", values_to = "value" ) %>% 
   ggplot(aes(value))+
   geom_histogram(bins = 80) +
@@ -96,9 +92,9 @@ grimeDB_attr_trans <- grimeDB_attributes %>%
   #filter(distance_snapped < 1000) %>%  #I was playing if excluding sites that has been snapped far away changes things
   #group_by(Site_Nid) %>% # this was to check if grouping by sites (collapsing temporal variability) changes things. It does
   #summarise(across(everything(), mean, na.rm=TRUE)) %>% 
-  select( CH4mean,  GPP_yr:sresp_month, -area, -T_ECE, -S_ECE) %>% 
-  mutate(across(.cols=vars_to_log, log)) %>%  #log transform those variables
-  rename_with( ~str_c("Log", vars_to_log), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
+  select( CH4mean, month, COMID, Site_Nid,  GPP_yr:sresp_month, -area, -T_ECE, -S_ECE) %>% 
+  mutate(across(.cols=all_of(vars_to_log), log)) %>%  #log transform those variables
+  rename_with( ~str_c("Log", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
 #Do again some histograms with the log transformed variables
 grimeDB_attr_trans %>% 
@@ -107,6 +103,8 @@ grimeDB_attr_trans %>%
     geom_histogram(bins = 80) +
     theme_classic()+
     facet_wrap(~predictor, scales='free')
+
+ggsave("figures/histograms_transformed.png", width=16, height = 12)
 
 summary(grimeDB_attr_trans$LogCH4mean)
 
@@ -148,40 +146,260 @@ vars_for_plot <- corr_ch4 %>%
   facet_wrap(~predictor, scales='free')
 
  
-ggsave(filename= "figures/correlations.png", plot=plot_correlations, width = 18, height = 12)
+#ggsave(filename= "figures/correlations.png", plot=plot_correlations, width = 18, height = 12)
 
 # Start the modelling ----
 # Select useful variables for the model 
-cols_to_include <- c('LogCH4mean', 'elev', 'S_SAND', 'LogT_OC', 'Logslop', 'Loggw_month', 'npp_month','gpp_month', 'S_ESP', 'pyearRS',
+predictors_selected <- c( 'elev', 'S_SAND', 'LogT_OC', 'Logslop', 'Loggw_month', 'npp_month','gpp_month', 'S_ESP', 'pyearRS',
                      'precip_month', 'sresp_month', 'temp_month', 'Logpopdens', 'Logwetland', 'temp_yr', 'prec_yr' , 'Loguparea', 'GPP_yr')
 
 #check correlations between them
 grimeDB_attr_trans %>% 
-  select( cols_to_include) %>%
+  select( LogCH4mean, predictors_selected) %>%
   correlate() %>% 
   rplot(shape = 20, colors = c("red", "green"), print_cor = TRUE)+
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
-#select the potentially useful variables
+#remove variables that are highly correlated
 data_for_model <-  grimeDB_attr_trans %>% 
-  select(cols_to_include) %>% 
-  drop_na()
+  drop_na() %>% 
+  #select(month, COMID, LogCH4mean, predictors_selected) %>%
+  group_by(Site_Nid) %>% 
+  summarise(across(everything(), mean)) %>% 
+  select(-c('Site_Nid','COMID','GPP_yr', 'LogT_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'temp_month'))
 
 
-## Step-wise regression ----
-#1
-m_min <- lm(LogCH4mean ~ 1, data = data_for_model)
-m_max <-lm(
-    LogCH4mean ~ elev + S_SAND + LogT_OC + Logslop + Loggw_month + npp_month +
-      gpp_month + S_ESP + GPP_yr + pyearRS + precip_month + sresp_month + temp_month +
-      Logpopdens + Logwetland + temp_yr + prec_yr,
-    data = data_for_model )
-m_red <- step(m_max,
-              scope = c(upper = m_max, lower = m_min),
-              trace = 1)
-summary(m_red) #0.4237
 
-vif(m_red)
-print(paste("AIC =",round(AIC(m_red),0)))
-print(paste("N =",length(m_red$residuals)))
+
+# RF model using tidymodels ----
+#Links I ahve been looking at for this: 
+# https://www.tidymodels.org/start/recipes/
+# https://juliasilge.com/blog/sf-trees-random-tuning/
+# https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/
+
+
+####
+#### tuning parameter stuff
+
+#prep the dataset into a training and testing one
+grime_split <- initial_split(data_for_model) 
+
+
+grime_split %>% 
+  training() %>%
+  glimpse()
+
+#Model recipe, predict CH4, center and scale all predictors
+grime_recipe <-  training(grime_split) %>%
+  recipe(LogCH4mean ~.) %>%
+  step_corr(all_predictors()) %>%
+  step_center(all_predictors(), -all_outcomes()) %>%
+  step_scale(all_predictors(), -all_outcomes()) 
+
+grime_recipe
+
+#prepare the testing ds by passing on the recipe
+grime_prep <- prep(grime_recipe) 
+
+#prepare the training dataset
+grime_training <- juice(prep(grime_recipe))
+
+# we will tune the hyperparameters of the RF, so we prepare the model for that and put it in a workflow
+tune_spec <- rand_forest(
+  mtry = tune(),
+  trees = 1000,
+  min_n = tune() ) %>%
+  set_mode("regression") %>%
+  set_engine("ranger")
+
+tune_wf <- workflow() %>%
+  add_recipe(grime_recipe) %>%
+  add_model(tune_spec)
+
+#prepare the folds for the tuning
+set.seed(234)
+trees_folds <- vfold_cv(training(grime_split))
+
+
+# Now run a bunch of models in parallel with different combinations of parameters to find what works best
+doParallel::registerDoParallel()
+set.seed(345)
+
+tune_res <- tune_grid(
+  tune_wf,
+  resamples = trees_folds,
+  grid = 20
+)
+
+tune_res
+
+# lets have a look...
+tune_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  select(mean, min_n, mtry) %>%
+  pivot_longer(min_n:mtry,
+               values_to = "value",
+               names_to = "parameter"
+  ) %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+
+#Do a more targeted tuning with a new grid
+rf_grid <- grid_regular(
+  mtry(range = c(20, 40)),
+  min_n(range = c(30, 40)),
+  levels = 5
+)
+
+set.seed(456)
+regular_res <- tune_grid(
+  tune_wf,
+  resamples = trees_folds,
+  grid = rf_grid
+)
+
+
+#select the best one and finish the model 
+best_auc <- select_best(tune_res, "rmse")
+
+final_rf <- finalize_model(
+  tune_spec,
+  best_auc
+)
+
+
+final_rf %>%
+  set_engine("ranger", importance = "permutation") %>%
+  fit(LogCH4mean ~ .,
+      data = juice(grime_prep)
+  ) %>%
+  vip(geom = "point")
+
+
+final_wf <- workflow() %>%
+  add_recipe(grime_recipe) %>%
+  add_model(final_rf)
+
+final_res <- final_wf %>%
+  last_fit(grime_split)
+
+final_res %>%
+  collect_metrics()
+
+
+
+
+
+##### other trials, not good.
+
+# Create data frames for the two sets:
+train_data <- training(grime_split)
+test_data  <- testing(grime_split)
+
+# resample the data with 10-fold cross-validation 
+folds  <- vfold_cv(grime_training, v=10)
+
+#Model recipe, predict CH4, center and scale all predictors
+grime_recipe <-  training(grime_split) %>%
+  recipe(LogCH4mean ~.) %>%
+  step_corr(all_predictors()) %>%
+  step_center(all_predictors(), -all_outcomes()) %>%
+  step_scale(all_predictors(), -all_outcomes()) 
+
+grime_recipe
+
+
+grime_ranger <- rand_forest( mode = "regression") %>%
+  set_engine("ranger") 
+
+model_default <-
+  grime_ranger %>%
+  fit(LogCH4mean~., data = train_data)
+
+model_default
+
+model_default %>% 
+  predict(test_data) %>% 
+  bind_cols(test_data) %>% 
+  metrics(LogCH4mean, .pred)  
+
+
+
+rf_spec_new <-
+  rand_forest(
+    mode = "regression",
+    mtry = tune(),
+    trees = tune() ) %>%
+  set_engine("ranger")
+
+# Create a workflow
+rf_workflow <-
+  workflow() %>%
+  add_variables(
+    outcomes = LogCH4mean, predictors = everything()
+  ) %>%
+  add_model(rf_spec_new)
+
+set.seed(300)
+grid_tune <-
+  rf_workflow %>%
+  tune_grid(
+    resamples = folds, 
+    grid =  5
+  )
+)
+
+collect_metrics(grid_tune)
+
+show_best(grid_tune, n = 1)
+
+
+mod_final <-
+  finalize_workflow(rf_workflow, select_best(grid_tune)) %>%
+  fit(train_data)
+
+mod_final %>% 
+  predict(test_data) %>% 
+  bind_cols(test_data) %>% 
+  metrics(LogCH4mean, .pred) 
+
+
+manual_final %>%
+  set_engine("ranger", importance = "permutation") %>%
+  fit(LogCH4mean ~ .,
+      data = juice(prep(grime_recipe))
+  ) %>%
+  vip(geom = "point")
+
+
+
+rf_wf <- 
+  workflow() %>%
+  add_model(grime_ranger) %>%
+  add_formula(LogCH4mean ~ .)
+
+set.seed(456)
+rf_fit_rs <- 
+  rf_wf %>% 
+  fit_resamples(folds,
+                control = control_resamples(save_pred = TRUE))
+
+collect_metrics(rf_fit_rs)
+
+grime_probs <- rf_fit_rs %>%
+  collect_predictions()
+
+rsq(truth=LogCH4mean, estimate=.pred, data=grime_probs)
+
+ggplot(grime_probs)+
+  geom_point(aes(.pred, LogCH4mean))+
+  geom_abline(slope = 1, intercept = 0)
+
+
+rf_fit_rs %>%
+  vip()
+
 

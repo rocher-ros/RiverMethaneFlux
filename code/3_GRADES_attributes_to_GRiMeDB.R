@@ -138,11 +138,7 @@ grime_comids <- read_csv("data/processed/sites_meth_comid.csv") %>%
   mutate(Site_Nid= as.character(Site_Nid))
 
 # Process all files ----
-#Check duplicated sites
-grime_comids  %>% 
-  group_by(Site_Nid) %>% 
-  summarize(n=n()) %>%  
-  filter(n>1) %>% print(n=400)
+
 
 sites_clean <- sites_df %>% 
   left_join(grime_comids, by="Site_Nid") %>% 
