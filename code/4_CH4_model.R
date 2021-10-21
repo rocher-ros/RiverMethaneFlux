@@ -5,7 +5,7 @@
 
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'randomForest', 'nlme', 'googledrive' , 'corrr', 'car', 'caret' )
+package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip', 'corrr')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -15,14 +15,6 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 
 # Now load all the packages
 lapply(package_list, require, character.only = TRUE)
-
-# Add some custom functions ----
-# Function to replace 0s to the lowest value, to avoid problems in log trans
-zero_to_min <- function(x){
-  min_nozero <- min( x[ x > 0 ], na.rm = TRUE )
-  x[ x <= 0 ] <- min_nozero
-  x
-}
 
 
 
@@ -46,15 +38,18 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 #    Thermogenically affected, Ditches
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
   filter(`Aggregated?` == "No",
-         !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>% 
-  dplyr::select(where(is.numeric))
+         !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
+  mutate(month=month(date)) %>% 
+  select( COMID, Site_Nid,CH4mean, month, GPP_yr:sresp_month,
+         -c(Channel_type, `Aggregated?`, date_end, date, area, T_ECE, S_ECE, temp_month, WaterTemp_actual, WaterTemp_est, discharge_measured)) 
+
 
 colnames(grimeDB_attributes)
 
 # Explore the raw data and process before the modelling
 
 #histograms of all variables, some will need logtansformation
-grimeDB_attributes %>% 
+grimeDB_attributes %>%
   pivot_longer(cols = everything(), names_to = "variable", values_to = "value" ) %>% 
   ggplot(aes(value))+
   geom_histogram(bins = 80) +
@@ -63,7 +58,7 @@ grimeDB_attributes %>%
 
 ggsave("figures/histograms_rawdata.png", width=16, height = 12)
 
-#check variable sindividually if needed
+#check variables individually if needed
 grimeDB_attributes %>% 
   select(val = gw_month) %>% 
   ggplot(aes(val))+
@@ -71,34 +66,27 @@ grimeDB_attributes %>%
   theme_classic()
 
 
-#remove some extreme values for some variables
-grimeDB_attributes <- grimeDB_attributes %>% 
-  mutate(CH4mean= ifelse(CH4mean > 500, NA, CH4mean),
-         popdens= ifelse(popdens > 4000, NA, popdens),
-         gw_month= ifelse(gw_month < .1, .1, gw_month))
-
-
-#histograms of all variables   
-grimeDB_attributes %>% 
-  pivot_longer(cols = everything(), names_to = "variable", values_to = "value" ) %>% 
-  ggplot(aes(value))+
-  geom_histogram(bins = 80) +
-  theme_classic()+
-  facet_wrap(~variable, scales='free')
+#check negative values 
+vars_to_shift <- grimeDB_attributes  %>% 
+  dplyr::select_if(~any(. < 0)) %>% 
+ summarise(across(everything(), ~min(.x, na.rm = TRUE))) %>% 
+  pivot_longer( everything(), names_to = "variable", values_to = "minimum") %>% 
+  mutate(minimum=abs(minimum))
 
 # we will log transform those to start with
 vars_to_log <- c('CH4mean','uparea','popdens','slop','S_CACO3','S_CASO4' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 
-                  'k_month', 'gw_month', 'wetland' )
+                  'k_month', 'gw_month', 'wetland', 'elev', 'precip_month', 'S_ESP', 'T_ESP' )
 
 #dataset with some variables log transformed
 grimeDB_attr_trans <- grimeDB_attributes %>%
-  mutate(across(where(is.numeric), zero_to_min )) %>%
-  #filter(distance_snapped < 1000) %>%  #I was playing if excluding sites that has been snapped far away changes things
+  mutate(npp_month = npp_month + vars_to_shift$minimum[vars_to_shift$variable == "npp_month"],
+         elev = elev + vars_to_shift$minimum[vars_to_shift$variable == "elev"],
+         temp_yr = temp_yr + vars_to_shift$minimum[vars_to_shift$variable == "temp_yr"],
+         tavg_month = tavg_month + vars_to_shift$minimum[vars_to_shift$variable == "tavg_month"]) %>%
   #group_by(Site_Nid) %>% # this was to check if grouping by sites (collapsing temporal variability) changes things. It does
   #summarise(across(everything(), mean, na.rm=TRUE)) %>% 
-  select( CH4mean,  GPP_yr:sresp_month, -area, -T_ECE, -S_ECE) %>% 
-  mutate(across(.cols=vars_to_log, log)) %>%  #log transform those variables
-  rename_with( ~str_c("Log", vars_to_log), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
+  mutate(across(.cols=all_of(vars_to_log), ~log(.x+.01))) %>%  #log transform those variables, shift a bit from 0 as well
+  rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
 #Do again some histograms with the log transformed variables
 grimeDB_attr_trans %>% 
@@ -108,12 +96,14 @@ grimeDB_attr_trans %>%
     theme_classic()+
     facet_wrap(~predictor, scales='free')
 
-summary(grimeDB_attr_trans$LogCH4mean)
+ggsave("figures/histograms_transformed.png", width=16, height = 12)
+
+summary(grimeDB_attr_trans$Log_CH4mean)
 
 #pearson correlations for CH4 
 corr_ch4 <- grimeDB_attr_trans %>% 
   correlate() %>% 
-  focus(LogCH4mean)
+  focus(Log_CH4mean)
 
 grimeDB_attr_trans %>% 
   correlate() %>% 
@@ -124,12 +114,12 @@ ggsave("figures/correlations_predictors.png", width=16, height = 12)
 
 #check the coefficients in the console
 corr_ch4 %>% 
-  arrange(desc(abs(LogCH4mean))) %>% 
+  arrange(desc(abs(Log_CH4mean))) %>% 
   print(n=50)
 
 vars_for_plot <- corr_ch4 %>% 
-  arrange(desc(abs(LogCH4mean))) %>% 
-  mutate(predictor=fct_reorder(term, desc(abs(LogCH4mean)))) %>% 
+  arrange(desc(abs(Log_CH4mean))) %>% 
+  mutate(predictor=fct_reorder(term, desc(abs(Log_CH4mean)))) %>% 
   select(-term)
 
 
@@ -148,40 +138,213 @@ vars_for_plot <- corr_ch4 %>%
   facet_wrap(~predictor, scales='free')
 
  
-ggsave(filename= "figures/correlations.png", plot=plot_correlations, width = 18, height = 12)
+#ggsave(filename= "figures/correlations.png", plot=plot_correlations, width = 18, height = 12)
 
 # Start the modelling ----
 # Select useful variables for the model 
-cols_to_include <- c('LogCH4mean', 'elev', 'S_SAND', 'LogT_OC', 'Logslop', 'Loggw_month', 'npp_month','gpp_month', 'S_ESP', 'pyearRS',
-                     'precip_month', 'sresp_month', 'temp_month', 'Logpopdens', 'Logwetland', 'temp_yr', 'prec_yr' , 'Loguparea', 'GPP_yr')
-
-#check correlations between them
-grimeDB_attr_trans %>% 
-  select( cols_to_include) %>%
-  correlate() %>% 
-  rplot(shape = 20, colors = c("red", "green"), print_cor = TRUE)+
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-
-#select the potentially useful variables
-data_for_model <-  grimeDB_attr_trans %>% 
-  select(cols_to_include) %>% 
-  drop_na()
+predictors_selected <- c( 'Log_elev', 'S_SAND', 'Log_T_OC', 'Log_slop', 'Log_gw_month', 'npp_month','gpp_month', 'Log_S_ESP', 'pyearRS',
+                     'Log_precip_month', 'sresp_month', 'tavg_month', 'Log_popdens', 'Log_wetland', 'temp_yr', 'prec_yr' , 'Log_uparea', 'GPP_yr')
 
 
-## Step-wise regression ----
-#1
-m_min <- lm(LogCH4mean ~ 1, data = data_for_model)
-m_max <-lm(
-    LogCH4mean ~ elev + S_SAND + LogT_OC + Logslop + Loggw_month + npp_month +
-      gpp_month + S_ESP + GPP_yr + pyearRS + precip_month + sresp_month + temp_month +
-      Logpopdens + Logwetland + temp_yr + prec_yr,
-    data = data_for_model )
-m_red <- step(m_max,
-              scope = c(upper = m_max, lower = m_min),
-              trace = 1)
-summary(m_red) #0.4237
 
-vif(m_red)
-print(paste("AIC =",round(AIC(m_red),0)))
-print(paste("N =",length(m_red$residuals)))
+
+# RF model using tidymodels ----
+#Links I ahve been looking at for this: 
+# https://www.tidymodels.org/start/recipes/
+# https://juliasilge.com/blog/sf-trees-random-tuning/
+# https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/
+
+
+## First run will be with the model with avergae values by site, to see the broad performance and tune RF parameters
+ #remove variables that are highly correlated
+ data_for_model <-  grimeDB_attr_trans %>% 
+   drop_na() %>% 
+   # select(month, COMID, Log_CH4mean, predictors_selected) %>%
+   group_by(Site_Nid) %>% 
+   summarise(across(everything(), mean)) %>% 
+   select(-c('Site_Nid','COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month'))
+ 
+
+#### tuning parameter stuff
+
+#prep the dataset into a training and testing one
+grime_split <- initial_split(data_for_model) 
+
+
+grime_split %>% 
+  training() %>%
+  glimpse()
+
+#Model recipe, predict CH4, center and scale all predictors
+grime_recipe <-  training(grime_split) %>%
+  recipe(Log_CH4mean ~.) %>%
+  step_corr(all_predictors()) %>%
+  step_center(all_predictors(), -all_outcomes()) %>%
+  step_scale(all_predictors(), -all_outcomes()) 
+
+grime_recipe
+
+#prepare the testing ds by passing on the recipe
+grime_prep <- prep(grime_recipe) 
+
+#prepare the training dataset
+grime_training <- juice(prep(grime_recipe))
+
+# we will tune the hyperparameters of the RF, so we prepare the model for that and put it in a workflow
+tune_spec <- rand_forest(
+  mtry = tune(),
+  trees = 1000,
+  min_n = tune() ) %>%
+  set_mode("regression") %>%
+  set_engine("ranger")
+
+tune_wf <- workflow() %>%
+  add_recipe(grime_recipe) %>%
+  add_model(tune_spec)
+
+#prepare the folds for the tuning
+set.seed(234)
+trees_folds <- vfold_cv(training(grime_split))
+
+
+# Now run a bunch of models in parallel with different combinations of parameters to find what works best
+doParallel::registerDoParallel()
+set.seed(345)
+
+tune_res <- tune_grid(
+  tune_wf,
+  resamples = trees_folds,
+  grid = 20
+)
+
+tune_res
+
+# lets have a look...
+tune_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  select(mean, min_n, mtry) %>%
+  pivot_longer(min_n:mtry,
+               values_to = "value",
+               names_to = "parameter") %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+
+#Do a more targeted tuning with a new grid
+rf_grid <- grid_regular(
+  mtry(range = c(20, 40)),
+  min_n(range = c(25, 40)),
+  levels = 5
+)
+
+set.seed(456)
+regular_res <- tune_grid(
+  tune_wf,
+  resamples = trees_folds,
+  grid = rf_grid
+)
+
+
+#select the best one and finish the model 
+best_auc <- select_best(regular_res, "rmse")
+
+final_rf <- finalize_model(
+  tune_spec,
+  best_auc
+)
+
+
+final_rf %>%
+  set_engine("ranger", importance = "permutation") %>%
+  fit(Log_CH4mean ~ .,
+      data = juice(grime_prep)
+  ) %>%
+  vip(geom = "point")
+
+
+final_wf <- workflow() %>%
+  add_recipe(grime_recipe) %>%
+  add_model(final_rf)
+
+#get the model from the last fit
+final_res <- final_wf %>%
+  last_fit(grime_split)
+
+#perf. metrics
+final_res %>%
+  collect_metrics()
+
+
+# Now do a model for each month, with the tuned parameters obtained with thw whole dataset----
+# ref: https://stackoverflow.com/questions/62687664/map-tidymodels-process-to-a-list-group-by-or-nest
+#Custom function to map it over month
+
+rf_mod <-
+  rand_forest(
+    mtry = 20,
+    trees = 1000,
+    min_n = 25 ) %>%
+  set_mode("regression") %>%
+  set_engine("ranger")
+
+wf <-
+  workflow() %>%
+  add_model(rf_mod)
+
+## big function of model fitting and predicting
+predict_RF_grime <- function(df) {
+  split <- initial_split(df)
+  train_df <- training(split)
+  test_df <- testing(split)
+  
+  #create recipe
+  recipe_train <- train_df %>% 
+    recipe(Log_CH4mean ~.) %>%
+    step_corr(all_predictors()) %>%
+    step_center(all_predictors(), -all_outcomes()) %>%
+    step_scale(all_predictors(), -all_outcomes()) 
+  
+  #fit workflow on train data
+  fit_wf <-
+    wf %>%
+    add_recipe(recipe_train) %>%
+    fit(data = train_df)
+  
+  #predict on test data
+  predict(fit_wf, test_df) %>% 
+    bind_cols(test_df)
+  
+}
+
+## Prepare the data and run the model via map
+
+data_model_nested <- grimeDB_attr_trans %>% 
+  select(-c('Site_Nid','COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month')) %>% 
+  drop_na() %>% 
+  group_by(month) %>% 
+  nest() %>% 
+  arrange(month)
+
+#Run the model for each month in a map
+monthly_models <- data_model_nested %>%
+  mutate(predictions = map(data, possibly(predict_RF_grime, otherwise = NA)))
+
+#get the predictions
+preds_obs <- monthly_models %>% 
+  unnest(predictions)
+  #filter(month == 1) %>% 
+  select(predictions) %>% 
+  unlist()
+
+  #plot them  
+ggplot(preds_obs, aes(.pred, Log_CH4mean))+
+  geom_point(alpha=.6)+
+  geom_abline(slope=1, intercept = 0)+
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),label.y.npc = 0.9)+ #put R2 and label
+  #stat_regline_equation( label.y.npc = 1)+
+  labs(x="CH4 predictions", y="CH4 observations")+
+  theme_bw()+
+  facet_wrap(~month)
 
