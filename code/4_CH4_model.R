@@ -347,10 +347,11 @@ ggplot(preds_obs, aes(.pred, Log_CH4mean))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
   stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
-  #stat_regline_equation( label.y.npc = 1)+
   labs(x="CH4 predictions", y="CH4 observations", title="one model for each month")+
   theme_bw()+
   facet_wrap(~month)
+
+ggsave(filename= "figures/model_perf_monthly.png", width = 12, height = 8)
 
 
 ## run the data on the whole dataset, not nesting by month ----
@@ -370,7 +371,8 @@ ggplot( aes(.pred, Log_CH4mean))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
   stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
-  #stat_regline_equation( label.y.npc = 1)+
   labs(x="CH4 predictions", y="CH4 observations", title="one model for all data")+
   theme_bw()+
   facet_wrap(~month)
+
+ggsave(filename= "figures/model_perf_yearly.png", width = 12, height = 8)
