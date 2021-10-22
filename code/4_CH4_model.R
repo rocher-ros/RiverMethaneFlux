@@ -1,11 +1,12 @@
 # Info ------
+# Author: Gerard Rocher-Ros
 # Script to model CH4 concentrations in rivers globally.
-# First part is to clean and transform data needed for the model
+# Part 1 is to clean and transform data needed for the model
 
 
-# Load  and install packages ----
+# 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip', 'corrr')
+package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip', 'corrr', 'ggpubr')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -18,7 +19,7 @@ lapply(package_list, require, character.only = TRUE)
 
 
 
-# Read files ----
+## Read files ----
 ## Download the GRiMeDB with GRADES 
 if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE) {
   print("files already downloaded")
@@ -30,7 +31,7 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
   )
 }
 
-# Data filtering ----
+# 1. Data filtering ----
 # First clean the methDB for the useful sites 
 # Steps done:
 # 1. remove aggregated sites
@@ -66,7 +67,7 @@ grimeDB_attributes %>%
   theme_classic()
 
 
-#check negative values 
+#get the variables that have negative values, and get the lowest value above 0. I will use this value to shift the data a bit prior log transform 
 vars_to_shift <- grimeDB_attributes  %>% 
   dplyr::select_if(~any(. < 0)) %>% 
  summarise(across(everything(), ~min(.x, na.rm = TRUE))) %>% 
@@ -89,6 +90,7 @@ grimeDB_attr_trans <- grimeDB_attributes %>%
   rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
 #Do again some histograms with the log transformed variables
+# some variables are still very skewed, usually the anthropogenic predictors that have lots of 0s
 grimeDB_attr_trans %>% 
   pivot_longer(cols = everything(), names_to = "predictor", values_to = "value" ) %>% 
   ggplot(aes(value))+
@@ -98,9 +100,9 @@ grimeDB_attr_trans %>%
 
 ggsave("figures/histograms_transformed.png", width=16, height = 12)
 
-summary(grimeDB_attr_trans$Log_CH4mean)
 
-#pearson correlations for CH4 
+
+#pearson correlations for CH4 with the predictors
 corr_ch4 <- grimeDB_attr_trans %>% 
   correlate() %>% 
   focus(Log_CH4mean)
@@ -117,6 +119,8 @@ corr_ch4 %>%
   arrange(desc(abs(Log_CH4mean))) %>% 
   print(n=50)
 
+
+#get the r coefficients from the df for later plotting
 vars_for_plot <- corr_ch4 %>% 
   arrange(desc(abs(Log_CH4mean))) %>% 
   mutate(predictor=fct_reorder(term, desc(abs(Log_CH4mean)))) %>% 
@@ -140,22 +144,21 @@ vars_for_plot <- corr_ch4 %>%
  
 #ggsave(filename= "figures/correlations.png", plot=plot_correlations, width = 18, height = 12)
 
-# Start the modelling ----
-# Select useful variables for the model 
+# 2.  RF model using tidymodels ----
+ 
+# Select useful variables for the model, some variables were removed due to a high correlation with other ones 
 predictors_selected <- c( 'Log_elev', 'S_SAND', 'Log_T_OC', 'Log_slop', 'Log_gw_month', 'npp_month','gpp_month', 'Log_S_ESP', 'pyearRS',
                      'Log_precip_month', 'sresp_month', 'tavg_month', 'Log_popdens', 'Log_wetland', 'temp_yr', 'prec_yr' , 'Log_uparea', 'GPP_yr')
 
 
-
-
-# RF model using tidymodels ----
-#Links I ahve been looking at for this: 
+#Links I have been looking at for this: 
 # https://www.tidymodels.org/start/recipes/
 # https://juliasilge.com/blog/sf-trees-random-tuning/
 # https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/
 
 
-## First run will be with the model with avergae values by site, to see the broad performance and tune RF parameters
+## parameter tuning  for the RF, takes several hours so welcome to skip it ----
+## First run will be with the model with average values by site, to see the broad performance and tune RF parameters
  #remove variables that are highly correlated
  data_for_model <-  grimeDB_attr_trans %>% 
    drop_na() %>% 
@@ -165,12 +168,10 @@ predictors_selected <- c( 'Log_elev', 'S_SAND', 'Log_T_OC', 'Log_slop', 'Log_gw_
    select(-c('Site_Nid','COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month'))
  
 
-#### tuning parameter stuff
-
 #prep the dataset into a training and testing one
 grime_split <- initial_split(data_for_model) 
 
-
+#have a look
 grime_split %>% 
   training() %>%
   glimpse()
@@ -184,7 +185,7 @@ grime_recipe <-  training(grime_split) %>%
 
 grime_recipe
 
-#prepare the testing ds by passing on the recipe
+#prepare the testing df by passing on the recipe
 grime_prep <- prep(grime_recipe) 
 
 #prepare the training dataset
@@ -255,7 +256,6 @@ final_rf <- finalize_model(
   best_auc
 )
 
-
 final_rf %>%
   set_engine("ranger", importance = "permutation") %>%
   fit(Log_CH4mean ~ .,
@@ -277,10 +277,12 @@ final_res %>%
   collect_metrics()
 
 
-# Now do a model for each month, with the tuned parameters obtained with thw whole dataset----
+##  Run the models ----
+#with the tuned parameters obtained with thw whole dataset
 # ref: https://stackoverflow.com/questions/62687664/map-tidymodels-process-to-a-list-group-by-or-nest
-#Custom function to map it over month
 
+#Custom function to map it over month, wwith the paramaters obtained from the tuning
+#setup of the RF model
 rf_mod <-
   rand_forest(
     mtry = 20,
@@ -289,9 +291,11 @@ rf_mod <-
   set_mode("regression") %>%
   set_engine("ranger")
 
+#prepare a workflow with it to feed into the function
 wf <-
   workflow() %>%
   add_model(rf_mod)
+
 
 ## big function of model fitting and predicting
 predict_RF_grime <- function(df) {
@@ -315,17 +319,19 @@ predict_RF_grime <- function(df) {
   #predict on test data
   predict(fit_wf, test_df) %>% 
     bind_cols(test_df)
-  
 }
 
-## Prepare the data and run the model via map
+## Run the model via map for each month ----
 
+#prepare a dataset, nesting by month
 data_model_nested <- grimeDB_attr_trans %>% 
   select(-c('Site_Nid','COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month')) %>% 
   drop_na() %>% 
   group_by(month) %>% 
   nest() %>% 
   arrange(month)
+
+set.seed(123)
 
 #Run the model for each month in a map
 monthly_models <- data_model_nested %>%
@@ -334,17 +340,37 @@ monthly_models <- data_model_nested %>%
 #get the predictions
 preds_obs <- monthly_models %>% 
   unnest(predictions)
-  #filter(month == 1) %>% 
-  select(predictions) %>% 
-  unlist()
+  
 
-  #plot them  
+#plot them  
 ggplot(preds_obs, aes(.pred, Log_CH4mean))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
-  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),label.y.npc = 0.9)+ #put R2 and label
+  stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
   #stat_regline_equation( label.y.npc = 1)+
-  labs(x="CH4 predictions", y="CH4 observations")+
+  labs(x="CH4 predictions", y="CH4 observations", title="one model for each month")+
   theme_bw()+
   facet_wrap(~month)
 
+
+## run the data on the whole dataset, not nesting by month ----
+data_model <- grimeDB_attr_trans %>%
+  select(-c('Site_Nid','COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month')) %>% 
+  drop_na()
+
+set.seed(123)
+
+#Run the model for each month in a map
+yearly_model <- predict_RF_grime(data_model)
+
+
+#plot them 
+yearly_model %>% mutate(month=round(month,0)) %>% 
+ggplot( aes(.pred, Log_CH4mean))+
+  geom_point(alpha=.6)+
+  geom_abline(slope=1, intercept = 0)+
+  stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
+  #stat_regline_equation( label.y.npc = 1)+
+  labs(x="CH4 predictions", y="CH4 observations", title="one model for all data")+
+  theme_bw()+
+  facet_wrap(~month)
