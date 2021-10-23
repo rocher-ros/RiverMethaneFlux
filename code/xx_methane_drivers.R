@@ -16,6 +16,7 @@ lapply(package_list, require, character.only = TRUE)
 load(file.path("data", "raw", "MethDB_tables_converted.rda"))
 
 
+
 #Merge the temperature estimated and measured into one column
 conc_df <- conc_df %>% 
   mutate(WaterTemp_best = if_else(is.na(WaterTemp_actual) == FALSE,WaterTemp_actual, WaterTemp_est ))
