@@ -67,23 +67,15 @@ grimeDB_attributes %>%
   theme_classic()
 
 
-#get the variables that have negative values, and get the lowest value above 0. I will use this value to shift the data a bit prior log transform 
-vars_to_shift <- grimeDB_attributes  %>% 
-  dplyr::select_if(~any(. < 0)) %>% 
- summarise(across(everything(), ~min(.x, na.rm = TRUE))) %>% 
-  pivot_longer( everything(), names_to = "variable", values_to = "minimum") %>% 
-  mutate(minimum=abs(minimum))
+
+
 
 # we will log transform those to start with
 vars_to_log <- c('CH4mean','uparea','popdens','slop','S_CACO3','S_CASO4' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 
-                  'k_month', 'gw_month', 'wetland', 'elev', 'precip_month', 'S_ESP', 'T_ESP' )
+                  'k_month', 'gw_month', 'wetland',  'precip_month', 'S_ESP', 'T_ESP' )
 
 #dataset with some variables log transformed
 grimeDB_attr_trans <- grimeDB_attributes %>%
-  mutate(npp_month = npp_month + vars_to_shift$minimum[vars_to_shift$variable == "npp_month"],
-         elev = elev + vars_to_shift$minimum[vars_to_shift$variable == "elev"],
-         temp_yr = temp_yr + vars_to_shift$minimum[vars_to_shift$variable == "temp_yr"],
-         tavg_month = tavg_month + vars_to_shift$minimum[vars_to_shift$variable == "tavg_month"]) %>%
   #group_by(Site_Nid) %>% # this was to check if grouping by sites (collapsing temporal variability) changes things. It does
   #summarise(across(everything(), mean, na.rm=TRUE)) %>% 
   mutate(across(.cols=all_of(vars_to_log), ~log(.x+.01))) %>%  #log transform those variables, shift a bit from 0 as well
@@ -299,16 +291,17 @@ wf <-
 
 ## big function of model fitting and predicting
 predict_RF_grime <- function(df) {
-  split <- initial_split(df)
+  split <- initial_split(df )
   train_df <- training(split)
   test_df <- testing(split)
   
   #create recipe
   recipe_train <- train_df %>% 
-    recipe(Log_CH4mean ~.) %>%
-    step_corr(all_predictors()) %>%
-    step_center(all_predictors(), -all_outcomes()) %>%
-    step_scale(all_predictors(), -all_outcomes()) 
+    recipe(Log_CH4mean ~.) 
+    # %>%
+   # step_corr(all_predictors()) %>%
+  #  step_center(all_predictors(), -all_outcomes()) %>%
+  #  step_scale(all_predictors(), -all_outcomes()) 
   
   #fit workflow on train data
   fit_wf <-
@@ -317,15 +310,24 @@ predict_RF_grime <- function(df) {
     fit(data = train_df)
   
   #predict on test data
-  predict(fit_wf, test_df) %>% 
-    bind_cols(test_df)
+ preds <- predict(fit_wf, test_df) %>% 
+   bind_cols(test_df)
+ 
+model <- fit_wf  %>%
+  extract_fit_parsnip()
+
+return(list(preds, fit_wf))
+
 }
 
 ## Run the model via map for each month ----
 
 #prepare a dataset, nesting by month
 data_model_nested <- grimeDB_attr_trans %>% 
-  select(-c('Site_Nid','COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month')) %>% 
+  #group_by(Site_Nid, month) %>% 
+  #summarise(across(everything(), mean)) %>%
+  #ungroup() %>% 
+  select(-c('Site_Nid', 'COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month')) %>% 
   drop_na() %>% 
   group_by(month) %>% 
   nest() %>% 
@@ -335,15 +337,18 @@ set.seed(123)
 
 #Run the model for each month in a map
 monthly_models <- data_model_nested %>%
-  mutate(predictions = map(data, possibly(predict_RF_grime, otherwise = NA)))
+  mutate(month_label = tolower(month.abb[month]),
+         model_out = map(data, possibly(predict_RF_grime, otherwise = NA))) %>% 
+  rowwise() %>%
+  mutate( preds = model_out[1],
+    model_fit = model_out[2]) %>% 
+  select(-data, -model_out)
 
-#get the predictions
-preds_obs <- monthly_models %>% 
-  unnest(predictions)
-  
 
 #plot them  
-ggplot(preds_obs, aes(.pred, Log_CH4mean))+
+monthly_models %>% 
+  unnest(preds) %>% 
+ggplot( aes(.pred, Log_CH4mean))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
   stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
@@ -351,12 +356,16 @@ ggplot(preds_obs, aes(.pred, Log_CH4mean))+
   theme_bw()+
   facet_wrap(~month)
 
-ggsave(filename= "figures/model_perf_monthly.png", width = 12, height = 8)
+#ggsave(filename= "figures/model_perf_monthly.png", width = 12, height = 8)
 
+
+
+a <-   predict(monthly_models$model_fit[[1]], test_df) %>% 
+  bind_cols(test_df)
 
 ## run the data on the whole dataset, not nesting by month ----
 data_model <- grimeDB_attr_trans %>%
-  select(-c('Site_Nid','COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month')) %>% 
+  select(-c('COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month')) %>% 
   drop_na()
 
 set.seed(123)
@@ -364,9 +373,9 @@ set.seed(123)
 #Run the model for each month in a map
 yearly_model <- predict_RF_grime(data_model)
 
-
+yearly_preds <- yearly_model[1] %>% as.data.frame()
 #plot them 
-yearly_model %>% mutate(month=round(month,0)) %>% 
+yearly_preds %>% 
 ggplot( aes(.pred, Log_CH4mean))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
@@ -375,4 +384,74 @@ ggplot( aes(.pred, Log_CH4mean))+
   theme_bw()+
   facet_wrap(~month)
 
-ggsave(filename= "figures/model_perf_yearly.png", width = 12, height = 8)
+#ggsave(filename= "figures/model_perf_yearly.png", width = 12, height = 8)
+
+
+# 3. Predict values to the whole world ----
+
+
+
+
+#read data of all predictors globally for all COMIDS, to do the predictions
+global_preds <- read_csv( "data/processed/grade_attributes.csv") %>% 
+  rename_all( ~ str_replace(., "pRS", "sresp")) %>% 
+  rename_all( ~ str_replace(., "prec", "precip")) %>% 
+  rename(prec_yr = precip_yr)
+
+vars_to_log_glob <-  global_preds %>% 
+  select(contains(c("uparea", "popdens", "slop", "S_CACO3", "S_CASO4", "S_OC" ,
+                    "T_CACO3", "T_CASO4", "k_", "gw_", "wetland", "precip_", "S_ESP", "T_ESP"),
+                  ignore.case = FALSE)) %>%
+  colnames(.)
+
+vars_to_remove <-  global_preds %>% 
+  select(contains(c('GPP_yr', 'T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 
+                    'pyearRS', 'gpp_', 'tavg_'),
+                  ignore.case = FALSE)) %>%
+  colnames(.)
+
+#do same transformations to the global dataset
+global_preds_trans <- global_preds %>%
+  mutate(across(.cols=all_of(vars_to_log_glob), ~log(.x+.01))) %>%  #log transform those variables, shift a bit from 0 as well
+  rename_with( ~str_c("Log_", all_of(vars_to_log_glob)), .cols = all_of(vars_to_log_glob) )  %>% #rename the log transformed variables 
+  select(-vars_to_remove, -area) %>% 
+  drop_na()
+
+
+
+predict_methane <- function(all_models, month, global_predictors) {
+  all_months <- tolower(month.abb)
+  
+  month_selected <- all_months[month]
+  
+  model_month <- all_models$model_fit[[month]]
+
+  df_predictors <- global_predictors %>%
+    select(-ends_with(setdiff(all_months, month_selected))) %>%
+    rename_all(~ str_replace(., month_selected, "month"))
+  
+  out <- predict(model_month, df_predictors)
+  
+  colnames(out) <- paste("ch4", month_selected, sep="_")
+  out
+}
+
+ch4_jan <- predict_methane(monthly_models, 1, global_preds_trans)
+ch4_feb <- predict_methane(monthly_models, 2, global_preds_trans)
+ch4_mar <- predict_methane(monthly_models, 3, global_preds_trans)
+ch4_apr <- predict_methane(monthly_models, 4, global_preds_trans)
+ch4_may <- predict_methane(monthly_models, 5, global_preds_trans)
+ch4_jun <- predict_methane(monthly_models, 6, global_preds_trans)
+ch4_jul <- predict_methane(monthly_models, 7, global_preds_trans)
+ch4_aug <- predict_methane(monthly_models, 8, global_preds_trans)
+ch4_sep <- predict_methane(monthly_models, 9, global_preds_trans)
+ch4_oct <- predict_methane(monthly_models, 10, global_preds_trans)
+ch4_nov <- predict_methane(monthly_models, 11, global_preds_trans)
+ch4_dec <- predict_methane(monthly_models, 12, global_preds_trans)
+
+
+dat_out <- global_preds_trans %>% select(COMID, temp_yr) %>% 
+  bind_cols(ch4_jan, ch4_feb, ch4_mar, ch4_apr, ch4_may, ch4_jun,
+            ch4_jul, ch4_aug, ch4_sep, ch4_oct, ch4_nov, ch4_dec)
+
+write_csv(dat_out, "data/processed/meth_predictions.csv")
