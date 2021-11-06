@@ -1,6 +1,6 @@
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive', 'ncdf4', 'raster', 'sf',  'velox', 'tictoc')
+package_list <- c('tidyverse', 'googledrive', 'ncdf4', 'raster', 'sf',  'velox', 'tictoc', 'tmap')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -287,4 +287,37 @@ gw_to_upload <-  full_files[grepl("gwTable", full_files)]
 
 map2(gw_to_upload, gw_path_in_drive, drive_upload)
 
+# Try to get land cover data into grades as well
+
+data(land)
+
+land <- land %>% 
+  st_as_sf() %>% 
+  st_transform(4326)
+
+#get grades back in
+files <- list.files("data/raw/grades")[grepl(".shp$", list.files("data/raw/grades"))]
+
+shape_files <- paste("data/raw/grades", files[grepl(".shp$", files)], sep="/") 
+
+shapes_catchments <- shape_files[grepl("cat", shape_files)]
+
+list_shapes1 <- lapply(shapes_catchments[1:4], st_read)
+grades1 <-  do.call(what = sf:::rbind.sf, args=list_shapes1) %>% st_set_crs(4326)
+
+rm(list_shapes1)
+gc()
+
+grades_land1 <- st_join(grades1, land)
+
+rm(grades1)
+
+list_shapes2 <- lapply(shapes_catchments[5:9], st_read)
+
+grades2 <-  do.call(what = sf:::rbind.sf, args=list_shapes2) %>% st_set_crs(4326)
+
+rm(list_shapes2)
+gc()
+
+grades_land2 <- st_join(grades2, land)
 
