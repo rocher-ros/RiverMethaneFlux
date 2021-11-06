@@ -1,6 +1,6 @@
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'RCurl', 'sf', 'XML', 'countrycode', 'leaflet', 'googledrive')
+package_list <- c('tidyverse', 'RCurl', 'sf', 'XML', 'countrycode', 'leaflet', 'googledrive', 'lwgeom')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -364,3 +364,27 @@ sites_meth_comid %>%
   facet_wrap(~continent, scales = "free")+
   theme_bw()
 
+
+## last thing,  get point coordinates for all segments in grades 
+files <- list.files("data/raw/grades")[grepl(".shp$", list.files("data/raw/grades"))]
+
+shape_files <- paste("data/raw/grades", files[grepl(".shp$", files)], sep="/") 
+
+shapes_rivers <- shape_files[grepl("riv", shape_files)]
+
+list_shapes <- lapply(shapes_rivers, st_read)
+
+grades <-  do.call(what = sf:::rbind.sf, args=list_shapes) %>% st_set_crs(4326)
+
+grades_properties <- grades %>% 
+  mutate(start_point = st_startpoint(.),
+         lat = sf::st_coordinates(start_point)[,1],
+         lon = sf::st_coordinates(start_point)[,2]) %>% 
+  st_drop_geometry() %>% 
+  select(COMID, lengthkm, slope, uparea, NextDownID, lat, lon)
+
+write_csv(grades_properties, "data/raw/gis/GRADES_attributes/grades_lat_lon.csv")
+
+# upload the csv file to google drive
+drive_upload(media = "data/raw/gis/GRADES_attributes/grades_lat_lon.csv" ,
+             path = "SCIENCE/PROJECTS/RiverMethaneFlux/gis/grades_coords.csv")

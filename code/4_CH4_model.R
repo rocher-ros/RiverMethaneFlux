@@ -452,6 +452,7 @@ ch4_dec <- predict_methane(monthly_models, 12, global_preds_trans)
 
 dat_out <- global_preds_trans %>% select(COMID, temp_yr) %>% 
   bind_cols(ch4_jan, ch4_feb, ch4_mar, ch4_apr, ch4_may, ch4_jun,
-            ch4_jul, ch4_aug, ch4_sep, ch4_oct, ch4_nov, ch4_dec)
+            ch4_jul, ch4_aug, ch4_sep, ch4_oct, ch4_nov, ch4_dec) %>% 
+  mutate(across(starts_with("ch4"), exp))
 
 write_csv(dat_out, "data/processed/meth_predictions.csv")
