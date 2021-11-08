@@ -208,6 +208,7 @@ grades_attributes <-  grades_latlon %>%
   left_join(sresp, by ="COMID") %>% 
   left_join(uparea, by ="COMID") %>% 
   left_join(wetland, by ="COMID") %>% 
+  left_join(land, by ="COMID") %>% 
   mutate(across(where(is.numeric), ~na_if(., -Inf))) %>% 
   mutate(across(where(is.numeric), ~na_if(., Inf))) %>% 
   drop_na(elev)
