@@ -287,8 +287,9 @@ gw_to_upload <-  full_files[grepl("gwTable", full_files)]
 
 map2(gw_to_upload, gw_path_in_drive, drive_upload)
 
-# Try to get land cover data into grades as well
-
+# Try to get land cover data into grades as well ----
+dir.create("data/raw/gis/")
+dir.create("data/raw/gis/GRADES_attributes")
 #function to get the most common value (also works on strings)
 mode <- function(x) {
   ux <- unique(x)
@@ -319,6 +320,7 @@ for(i in 1:9){
   
   grades_land %>% 
     st_drop_geometry() %>%
+    drop_na(COMID) %>% 
     group_by(COMID) %>%
     summarise(cover = mode(cover),
               cover_cls = mode(cover_cls),
@@ -329,17 +331,16 @@ for(i in 1:9){
 
 }
 
-a <- read_csv("data/raw/gis/GRADES_attributes/land_01.csv") %>% 
-  drop_na(COMID)
+#upload the file to google drive
 
-b <- a %>% 
-  group_by(COMID) %>%
-  summarise(cover = mode(cover),
-            cover_cls = mode(cover_cls),
-            trees = mean(trees, na.rm=TRUE)) 
+full_files <- list.files("data/raw/gis/GRADES_attributes",full.names = TRUE) 
 
-b %>% 
-  filter(cover == "Bare area,unconsolidated (sand)") %>% 
-  print(n=100)
+path_in_drive <- paste("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes", 
+                       list.files("data/raw/gis/GRADES_attributes"), sep="/") 
 
-mode(b$main_cover)
+land_path_in_drive <-  path_in_drive[grepl("land", path_in_drive)] 
+
+land_to_upload <-  full_files[grepl("land", full_files)] 
+
+
+map2(land_to_upload, land_path_in_drive, drive_upload)
