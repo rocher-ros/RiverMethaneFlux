@@ -130,7 +130,7 @@ colnames(wetland)
 
 land <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "landcover", full.names = TRUE), read_csv) %>% 
   bind_rows() %>% 
-  select(COMID, cover, cover_cls, trees)
+  dplyr::select(COMID, cover, cover_cls, trees)
 
 colnames(land)
 
