@@ -302,22 +302,25 @@ shape_files <- paste("data/raw/grades", files[grepl(".shp$", files)], sep="/")
 
 shapes_catchments <- shape_files[grepl("cat", shape_files)]
 
-list_shapes1 <- lapply(shapes_catchments[1:4], st_read)
-grades1 <-  do.call(what = sf:::rbind.sf, args=list_shapes1) %>% st_set_crs(4326)
+sf::sf_use_s2(FALSE)
+for(i in 1:9){
+  grades <- read_sf(shapes_catchments[i]) %>% st_set_crs(4326)
+  
+  gc()
+  
+  grades_land <- st_join(land, grades)
+  
+  grades_land %>% 
+    st_drop_geometry() %>%
+    count(a, b, sort = TRUE) %>%
+    group_by(a) %>%
+    summarise(first = b[1],second = b[2])
+    write_csv( file=paste0("data/raw/gis/GRADES_attributes/land_0",i,".csv"))
+  
+  rm(grades_land, grades)
 
-rm(list_shapes1)
-gc()
+}
 
-grades_land1 <- st_join(grades1, land)
-
-rm(grades1)
-
-list_shapes2 <- lapply(shapes_catchments[5:9], st_read)
-
-grades2 <-  do.call(what = sf:::rbind.sf, args=list_shapes2) %>% st_set_crs(4326)
-
-rm(list_shapes2)
-gc()
-
-grades_land2 <- st_join(grades2, land)
+a <- read_csv("data/raw/gis/GRADES_attributes/land_01.csv") %>% 
+  drop_na(COMID)
 
