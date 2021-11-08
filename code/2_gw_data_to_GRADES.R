@@ -325,7 +325,7 @@ for(i in 1:9){
     summarise(cover = mode(cover),
               cover_cls = mode(cover_cls),
               trees = mean(trees, na.rm=TRUE)) %>% 
-    write_csv( file=paste0("data/raw/gis/GRADES_attributes/land_0",i,".csv"))
+    write_csv( file=paste0("data/raw/gis/GRADES_attributes/landcover_0",i,".csv"))
   
   rm(grades_land, grades)
 
