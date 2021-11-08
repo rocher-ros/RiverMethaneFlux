@@ -40,12 +40,24 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
   filter(`Aggregated?` == "No",
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
-  mutate(month=month(date)) %>% 
-  select( COMID, Site_Nid,CH4mean, month, GPP_yr:sresp_month,
-         -c(Channel_type, `Aggregated?`, date_end, date, area, T_ECE, S_ECE, temp_month, WaterTemp_actual, WaterTemp_est, discharge_measured)) 
-
+  mutate(forest = ifelse(cover_cls == "Forest", 1, 0),
+         water = ifelse(cover_cls == "Forest", 1, 0),
+         other_nat_veg = ifelse(cover_cls == "Other natural vegetation", 1, 0),
+         cropland = ifelse(cover_cls == "Cropland", 1, 0),
+         urban = ifelse(cover_cls == "Urban", 1, 0),
+         sparse_veg = ifelse(cover_cls == "Bare area/Sparse vegetation", 1, 0),
+         wetland_class =ifelse(cover_cls == "Wetland", 1, 0),
+         ice = ifelse(cover_cls == "Snow/ice", 1, 0),
+         water_class = ifelse(cover_cls == "Water", 1, 0),
+         month=month(date)) %>% 
+  dplyr::select( COMID, Site_Nid, CH4mean, month, GPP_yr:water_class,
+          -c(Channel_type, `Aggregated?`, date_end, date, area, T_ECE, S_ECE, 
+             temp_month, WaterTemp_actual, WaterTemp_est, discharge_measured, cover, cover_cls)) 
 
 colnames(grimeDB_attributes)
+  
+ggplot(grimeDB_attributes)+
+  geom_point(aes(wetland, wetland_class))
 
 # Explore the raw data and process before the modelling
 
