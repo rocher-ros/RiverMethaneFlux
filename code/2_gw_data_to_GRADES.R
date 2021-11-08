@@ -289,6 +289,13 @@ map2(gw_to_upload, gw_path_in_drive, drive_upload)
 
 # Try to get land cover data into grades as well
 
+#function to get the most common value (also works on strings)
+mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+#get land cover data
 data(land)
 
 land <- land %>% 
@@ -312,9 +319,10 @@ for(i in 1:9){
   
   grades_land %>% 
     st_drop_geometry() %>%
-    count(a, b, sort = TRUE) %>%
-    group_by(a) %>%
-    summarise(first = b[1],second = b[2])
+    group_by(COMID) %>%
+    summarise(cover = mode(cover),
+              cover_cls = mode(cover_cls),
+              trees = mean(trees, na.rm=TRUE)) %>% 
     write_csv( file=paste0("data/raw/gis/GRADES_attributes/land_0",i,".csv"))
   
   rm(grades_land, grades)
@@ -324,3 +332,14 @@ for(i in 1:9){
 a <- read_csv("data/raw/gis/GRADES_attributes/land_01.csv") %>% 
   drop_na(COMID)
 
+b <- a %>% 
+  group_by(COMID) %>%
+  summarise(cover = mode(cover),
+            cover_cls = mode(cover_cls),
+            trees = mean(trees, na.rm=TRUE)) 
+
+b %>% 
+  filter(cover == "Bare area,unconsolidated (sand)") %>% 
+  print(n=100)
+
+mode(b$main_cover)
