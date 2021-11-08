@@ -293,7 +293,7 @@ dir.create("data/raw/gis/GRADES_attributes")
 #function to get the most common value (also works on strings)
 mode <- function(x) {
   ux <- unique(x)
-  ux[which.max(tabulate(match(x, ux)))]
+  as.character(ux[which.max(tabulate(match(x, ux)))])
 }
 
 #get land cover data
@@ -312,28 +312,30 @@ shapes_catchments <- shape_files[grepl("cat", shape_files)]
 
 sf::sf_use_s2(FALSE)
 for(i in 1:9){
+  
   grades <- read_sf(shapes_catchments[i]) %>% st_set_crs(4326)
-  
-  gc()
-  
-  grades_land <- st_join(land, grades)
-  
-  grades_land %>% 
+
+  grades_land <- st_join(land, grades) %>% 
     st_drop_geometry() %>%
-    drop_na(COMID) %>% 
+    drop_na(COMID)
+  
+  dat_out <- grades_land %>% 
     group_by(COMID) %>%
-    summarise(cover = mode(cover),
-              cover_cls = mode(cover_cls),
-              trees = mean(trees, na.rm=TRUE)) %>% 
+    summarise(cover = mode(cover) %>% as.character(),
+              cover_cls = mode(cover_cls) %>%  as.character(),
+              trees = mean(trees, na.rm=TRUE)) 
+  
+  dat_out %>% 
     write_csv( file=paste0("data/raw/gis/GRADES_attributes/landcover_0",i,".csv"))
   
-  rm(grades_land, grades)
+  rm(grades_land, grades, dat_out)
+  gc()
 
 }
 
 #upload the file to google drive
 
-full_files <- list.files("data/raw/gis/GRADES_attributes",full.names = TRUE) 
+full_files <- list.files("data/raw/gis/GRADES_attributes", full.names = TRUE) 
 
 path_in_drive <- paste("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes", 
                        list.files("data/raw/gis/GRADES_attributes"), sep="/") 
