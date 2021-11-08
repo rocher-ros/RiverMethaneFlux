@@ -393,10 +393,7 @@ ggplot( aes(.pred, Log_CH4mean))+
 
 
 #read data of all predictors globally for all COMIDS, to do the predictions
-global_preds <- read_csv( "data/processed/grade_attributes.csv") %>% 
-  rename_all( ~ str_replace(., "pRS", "sresp")) %>% 
-  rename_all( ~ str_replace(., "prec", "precip")) %>% 
-  rename(prec_yr = precip_yr)
+global_preds <- read_csv( "data/processed/grade_attributes.csv") 
 
 vars_to_log_glob <-  global_preds %>% 
   select(contains(c("uparea", "popdens", "slop", "S_CACO3", "S_CASO4", "S_OC" ,

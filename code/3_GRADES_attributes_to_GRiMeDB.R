@@ -1,6 +1,6 @@
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive', 'lubridate')
+package_list <- c('tidyverse', 'googledrive', 'lubridate', 'sf')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -124,9 +124,19 @@ colnames(uparea)
 
 wetland <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "wetland", full.names = TRUE), read_csv) %>% 
   bind_rows() %>% 
-  mutate( wetland = (wetland*100)+.001)
+  mutate( wetland = (wetland*100))
 
 colnames(wetland)
+
+land <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "landcover", full.names = TRUE), read_csv) %>% 
+  bind_rows() %>% 
+  select(COMID, cover, cover_cls, trees)
+
+colnames(land)
+
+#read coordinates from grades
+grades_latlon <-  read_csv("data/raw/gis/GRADES_attributes/grades_lat_lon.csv") %>% 
+  select(COMID, lat, lon)
 
 ## Now get GRiMeDB ----
 load(file.path("data", "raw", "MethDB_tables_converted.rda"))
@@ -137,9 +147,9 @@ sites_df <- sites_df %>%
 grime_comids <- read_csv("data/processed/sites_meth_comid.csv") %>% 
   mutate(Site_Nid= as.character(Site_Nid))
 
+
+
 # Process all files ----
-
-
 sites_clean <- sites_df %>% 
   left_join(grime_comids, by="Site_Nid") %>% 
   drop_na(COMID)
@@ -155,10 +165,40 @@ conc_df_comids <- conc_df %>%
   mutate(CH4mean =ifelse(CH4mean < 0, 0.0001, CH4mean)) %>% 
   drop_na(CH4mean)
 
-#join all GRADES tables into one, and export it as one
-grades_attributes <-  annPP %>% 
-  left_join(eleSlope, by="COMID") %>% 
+# Gw has some gaps, fix it
+
+grades_gw_sf <- grades_latlon %>% 
   left_join(gwTable, by="COMID") %>% 
+  st_as_sf( coords = c("lat", "lon"),  crs = 4326) %>%
+  st_transform("+proj=eqearth +wktext") 
+
+#get the sites with gaps and no gaps in separate df
+gw_withdata <-  grades_gw_sf %>% 
+  drop_na(gw_jan) %>% 
+  st_sf()
+
+gw_missing <- grades_gw_sf %>%
+  filter_all(any_vars(is.na(.))) %>% 
+  select(COMID)
+
+#find nearest point with data
+nearest <- st_nearest_feature(gw_missing, gw_withdata)
+
+gw_filled <- cbind(gw_missing, st_drop_geometry(gw_withdata)[nearest,]) %>% 
+  select(-COMID.1)
+
+
+#join with both filled datasets
+gw_good <- bind_rows(gw_withdata %>% st_drop_geometry(), 
+                     gw_filled %>% st_drop_geometry())
+
+rm( grades_gw_sf, gw_withdata, gw_filled)
+
+#join all GRADES tables into one, and export it as one
+grades_attributes <-  grades_latlon %>% 
+  left_join(annPP, by="COMID") %>%  
+  left_join(eleSlope, by="COMID") %>% 
+  left_join(gw_good, by="COMID") %>% 
   left_join(k, by="COMID") %>% 
   left_join(monPP, by="COMID") %>% 
   left_join(monTemp, by="COMID") %>% 
@@ -169,9 +209,21 @@ grades_attributes <-  annPP %>%
   left_join(uparea, by ="COMID") %>% 
   left_join(wetland, by ="COMID") %>% 
   mutate(across(where(is.numeric), ~na_if(., -Inf))) %>% 
-  mutate(across(where(is.numeric), ~na_if(., Inf)))
+  mutate(across(where(is.numeric), ~na_if(., Inf))) %>% 
+  drop_na(elev)
 
-write_csv(grades_attributes, "data/processed/grade_attributes.csv")  
+rm(annPP, eleSlope, gwTable, k, land, monPP, monTemp, popdens, prectemp, soilATT, sresp, 
+   uparea, wetland, gw_good)
+
+gc()
+
+
+# export the file with all attributes
+grades_attributes %>% 
+  rename_all( ~ str_replace(., "pRS", "sresp")) %>% 
+  rename_all( ~ str_replace(., "prec", "precip")) %>% 
+  rename(prec_yr = precip_yr) %>% 
+write_csv("data/processed/grade_attributes.csv")  
 
 drive_upload(media = "data/processed/grade_attributes.csv",
              path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attributes.csv",
@@ -289,7 +341,8 @@ grimeDB_attributes_mon %>% filter(Site_Nid == "2597") %>%
   geom_point()
 
 #save to file and upload to google drive
-write_csv(grimeDB_attributes_mon, "data/processed/grimeDB_concs_with_grade_attributes.csv")  
+grimeDB_attributes_mon %>% 
+  write_csv("data/processed/grimeDB_concs_with_grade_attributes.csv")  
 
 drive_upload(media = "data/processed/grimeDB_concs_with_grade_attributes.csv",
              path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grimeDB_concs_with_grade_attributes.csv",
