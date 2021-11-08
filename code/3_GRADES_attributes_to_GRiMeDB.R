@@ -334,7 +334,7 @@ grimeDB_attributes_mon <- grimeDB_attributes %>%
                                 month(date) == 10 ~ pRS_oct*365,
                                 month(date) == 11 ~ pRS_nov*365,
                                 month(date) == 12 ~ pRS_dec*365) ) %>%
-  select(!ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")))
+  dplyr::select(!ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")))
 
 # quickly check one site
 grimeDB_attributes_mon %>% filter(Site_Nid == "2597") %>% 
