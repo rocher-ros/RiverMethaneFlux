@@ -378,8 +378,8 @@ grades <-  do.call(what = sf:::rbind.sf, args=list_shapes) %>% st_set_crs(4326)
 
 grades_properties <- grades %>% 
   mutate(start_point = st_startpoint(.),
-         lat = sf::st_coordinates(start_point)[,1],
-         lon = sf::st_coordinates(start_point)[,2]) %>% 
+         lon = sf::st_coordinates(start_point)[,1],
+         lat = sf::st_coordinates(start_point)[,2]) %>% 
   st_drop_geometry() %>% 
   select(COMID, lengthkm, slope, uparea, NextDownID, lat, lon)
 

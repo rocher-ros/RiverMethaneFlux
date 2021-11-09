@@ -169,7 +169,7 @@ conc_df_comids <- conc_df %>%
 
 grades_gw_sf <- grades_latlon %>% 
   left_join(gwTable, by="COMID") %>% 
-  st_as_sf( coords = c("lat", "lon"),  crs = 4326) %>%
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
   st_transform("+proj=eqearth +wktext") 
 
 #get the sites with gaps and no gaps in separate df
