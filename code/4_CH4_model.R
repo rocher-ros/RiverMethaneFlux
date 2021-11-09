@@ -434,17 +434,28 @@ drive_download( file="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attribut
                 path="data/processed/grade_attributes.csv",
              overwrite = TRUE)
 
-global_preds <- read_csv( "data/processed/grade_attributes.csv") 
+global_preds <- read_csv( "data/processed/grade_attributes.csv") %>% 
+  mutate(forest = ifelse(cover_cls == "Forest", 1, 0),
+         water = ifelse(cover_cls == "Forest", 1, 0),
+         other_nat_veg = ifelse(cover_cls == "Other natural vegetation", 1, 0),
+         cropland = ifelse(cover_cls == "Cropland", 1, 0),
+         urban = ifelse(cover_cls == "Urban", 1, 0),
+         sparse_veg = ifelse(cover_cls == "Bare area/Sparse vegetation", 1, 0),
+         wetland_class =ifelse(cover_cls == "Wetland", 1, 0),
+         ice = ifelse(cover_cls == "Snow/ice", 1, 0),
+         water_class = ifelse(cover_cls == "Water", 1, 0)) %>% 
+  dplyr::select( -COMID,  -cover, -cover_cls)
 
 vars_to_log_glob <-  global_preds %>% 
-  select(contains(c("uparea", "popdens", "slop", "S_CACO3", "S_CASO4", "S_OC" ,
-                    "T_CACO3", "T_CASO4", "k_", "gw_", "wetland", "precip_", "S_ESP", "T_ESP"),
-                  ignore.case = FALSE)) %>%
+  select(contains(c("uparea", "popdens", "slop", "S_CACO3",  "T_OC" ,
+                    "T_CACO3", "T_CASO4", "k_", "gw_", "wetland",  "S_ESP", "T_ESP"),
+                  ignore.case = FALSE), -wetland_class) %>%
   colnames(.)
+ 
 
 vars_to_remove <-  global_preds %>% 
-  select(contains(c('GPP_yr', 'T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 
-                    'pyearRS', 'gpp_', 'tavg_'),
+  select(contains(c('GPP_yr', 'S_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS',"pyearRH",
+                    'pyearRS', 'npp_', 'forest',  'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY','S_CASO4'),
                   ignore.case = FALSE)) %>%
   colnames(.)
 
@@ -452,10 +463,10 @@ vars_to_remove <-  global_preds %>%
 global_preds_trans <- global_preds %>%
   mutate(across(.cols=all_of(vars_to_log_glob), ~log(.x+.01))) %>%  #log transform those variables, shift a bit from 0 as well
   rename_with( ~str_c("Log_", all_of(vars_to_log_glob)), .cols = all_of(vars_to_log_glob) )  %>% #rename the log transformed variables 
-  select(-vars_to_remove, -area) %>% 
+  select(-vars_to_remove) %>% 
   drop_na()
 
-
+colnames(global_preds_trans)
 
 predict_methane <- function(all_models, month, global_predictors) {
   all_months <- tolower(month.abb)
