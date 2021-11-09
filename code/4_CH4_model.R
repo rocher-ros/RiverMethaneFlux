@@ -429,6 +429,11 @@ yearly_preds %>%
 
 
 #read data of all predictors globally for all COMIDS, to do the predictions
+
+drive_download(media = "data/processed/grade_attributes.csv",
+             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attributes.csv",
+             overwrite = TRUE)
+
 global_preds <- read_csv( "data/processed/grade_attributes.csv") 
 
 vars_to_log_glob <-  global_preds %>% 
