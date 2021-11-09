@@ -69,16 +69,7 @@ grimeDB_attributes %>%
   theme_classic()+
   facet_wrap(~variable, scales='free')
 
-ggsave("figures/histograms_rawdata.png", width=16, height = 12)
-
-#check variables individually if needed
-grimeDB_attributes %>% 
-  select(val = gw_month) %>% 
-  ggplot(aes(val))+
-  geom_histogram(bins = 80) +
-  theme_classic()
-
-
+#ggsave("figures/histograms_rawdata.png", width=16, height = 12)
 
 
 
@@ -102,7 +93,7 @@ grimeDB_attr_trans %>%
     theme_classic()+
     facet_wrap(~predictor, scales='free')
 
-ggsave("figures/histograms_transformed.png", width=16, height = 12)
+#ggsave("figures/histograms_transformed.png", width=16, height = 12)
 
 
 
@@ -151,9 +142,9 @@ vars_for_plot <- corr_ch4 %>%
 # 2.  RF model using tidymodels ----
  
 # Select useful variables for the model, some variables were removed due to a high correlation with other ones 
-predictors_selected <- c( 'Log_elev', 'S_SAND', 'Log_T_OC', 'Log_slop', 'Log_gw_month', 'npp_month','gpp_month', 'Log_S_ESP', 'pyearRS',
-                     'Log_precip_month', 'sresp_month', 'tavg_month', 'Log_popdens', 'Log_wetland', 'temp_yr', 'prec_yr' , 'Log_uparea', 'GPP_yr')
-
+variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS',"pyearRH",
+                         'gpp_month', 'tavg_month', 'forest', 'S_SILT', 'S_CLAY')
+ 
 
 #Links I have been looking at for this: 
 # https://www.tidymodels.org/start/recipes/
@@ -166,10 +157,9 @@ predictors_selected <- c( 'Log_elev', 'S_SAND', 'Log_T_OC', 'Log_slop', 'Log_gw_
  #remove variables that are highly correlated
  data_for_model <-  grimeDB_attr_trans %>% 
    drop_na() %>% 
-   # select(month, COMID, Log_CH4mean, predictors_selected) %>%
    group_by(Site_Nid) %>% 
    summarise(across(everything(), mean)) %>% 
-   select(-c('Site_Nid','COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month'))
+   select(-all_of(variables_to_remove))
  
 
 #prep the dataset into a training and testing one
@@ -187,10 +177,10 @@ grime_recipe <-  training(grime_split) %>%
   step_center(all_predictors(), -all_outcomes()) %>%
   step_scale(all_predictors(), -all_outcomes()) 
 
-grime_recipe
-
 #prepare the testing df by passing on the recipe
 grime_prep <- prep(grime_recipe) 
+
+grime_prep$steps
 
 #prepare the training dataset
 grime_training <- juice(prep(grime_recipe))
@@ -293,7 +283,7 @@ rf_mod <-
     trees = 1000,
     min_n = 25 ) %>%
   set_mode("regression") %>%
-  set_engine("ranger")
+  set_engine("ranger", importance="permutation")
 
 #prepare a workflow with it to feed into the function
 wf <-
@@ -328,7 +318,7 @@ predict_RF_grime <- function(df) {
 model <- fit_wf  %>%
   extract_fit_parsnip()
 
-return(list(preds, fit_wf))
+return(list(preds, fit_wf, train_df))
 
 }
 
@@ -339,7 +329,7 @@ data_model_nested <- grimeDB_attr_trans %>%
   #group_by(Site_Nid, month) %>% 
   #summarise(across(everything(), mean)) %>%
   #ungroup() %>% 
-  select(-c('Site_Nid', 'COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month')) %>% 
+  select(-all_of(variables_to_remove)) %>% 
   drop_na() %>% 
   group_by(month) %>% 
   nest() %>% 
@@ -377,7 +367,7 @@ a <-   predict(monthly_models$model_fit[[1]], test_df) %>%
 
 ## run the data on the whole dataset, not nesting by month ----
 data_model <- grimeDB_attr_trans %>%
-  select(-c('COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS', 'gpp_month', 'tavg_month')) %>% 
+  select(-all_of(variables_to_remove)) %>% 
   drop_na()
 
 set.seed(123)
@@ -386,6 +376,53 @@ set.seed(123)
 yearly_model <- predict_RF_grime(data_model)
 
 yearly_preds <- yearly_model[1] %>% as.data.frame()
+
+yearly_train <- yearly_model[[3]]
+
+n=20
+
+var_imp_repeated <- tibble(rept=NULL,
+       Variable=NULL,
+       Importance=NULL
+       )
+
+for(i in 1:n){
+  set.seed(n)
+  
+  yearly_model <- predict_RF_grime(data_model)
+  vals <- yearly_model[[2]] %>%
+    extract_fit_parsnip() %>% 
+    vi()
+  
+  var_imp_repeated <- var_imp_repeated %>% 
+    bind_rows(vals)
+  print(i)
+}
+ 
+ggplot(var_imp_repeated, 
+       aes(x=Importance, 
+           y= reorder(Variable, Importance, FUN = stats::median)))+
+  geom_violin(draw_quantiles = 0.5, color = "gray80", fill="red4",
+              scale = "width")+
+  theme_bw()
+
+
+rf_fit <- yearly_model[[2]] %>% 
+  fit(data = yearly_model[[3]])
+
+explainer_rf <- explain_tidymodels(
+  rf_fit, 
+  data = dplyr::select(yearly_train, -Log_CH4mean), 
+  y = yearly_train$Log_CH4mean,
+  label = "random forest"
+)
+
+
+pdp_rf <- model_profile(explainer_rf, N = 1000)
+
+plot(pdp_rf)
+
+
 #plot them 
 yearly_preds %>% 
 ggplot( aes(.pred, Log_CH4mean))+
@@ -393,8 +430,7 @@ ggplot( aes(.pred, Log_CH4mean))+
   geom_abline(slope=1, intercept = 0)+
   stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
   labs(x="CH4 predictions", y="CH4 observations", title="one model for all data")+
-  theme_bw()+
-  facet_wrap(~month)
+  theme_bw()
 
 #ggsave(filename= "figures/model_perf_yearly.png", width = 12, height = 8)
 
