@@ -356,7 +356,7 @@ ggplot( aes(.pred, Log_CH4mean))+
   theme_bw()+
   facet_wrap(~month)
 
-#ggsave(filename= "figures/model_perf_monthly.png", width = 12, height = 8)
+ggsave(filename= "figures/model_perf_monthly.png", width = 12, height = 8)
 
 
 
