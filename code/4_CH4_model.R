@@ -75,7 +75,7 @@ grimeDB_attributes %>%
 
 # we will log transform those to start with
 vars_to_log <- c('CH4mean','uparea','popdens','slop','S_CACO3','S_CASO4' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 
-                  'k_month', 'gw_month', 'wetland',  'precip_month', 'S_ESP', 'T_ESP' )
+                  'k_month', 'gw_month', 'wetland',  'S_ESP', 'T_ESP' )
 
 #dataset with some variables log transformed
 grimeDB_attr_trans <- grimeDB_attributes %>%
@@ -142,8 +142,9 @@ vars_for_plot <- corr_ch4 %>%
 # 2.  RF model using tidymodels ----
  
 # Select useful variables for the model, some variables were removed due to a high correlation with other ones 
-variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_T_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS',"pyearRH",
-                         'gpp_month', 'tavg_month', 'forest', 'S_SILT', 'S_CLAY')
+variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS',"pyearRH",
+                         'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
+                         'Log_S_CASO4', 'Log_S_CASO4')
  
 
 #Links I have been looking at for this: 
@@ -326,9 +327,6 @@ return(list(preds, fit_wf, train_df))
 
 #prepare a dataset, nesting by month
 data_model_nested <- grimeDB_attr_trans %>% 
-  #group_by(Site_Nid, month) %>% 
-  #summarise(across(everything(), mean)) %>%
-  #ungroup() %>% 
   select(-all_of(variables_to_remove)) %>% 
   drop_na() %>% 
   group_by(month) %>% 
@@ -379,34 +377,18 @@ yearly_preds <- yearly_model[1] %>% as.data.frame()
 
 yearly_train <- yearly_model[[3]]
 
-n=20
 
-var_imp_repeated <- tibble(rept=NULL,
-       Variable=NULL,
-       Importance=NULL
-       )
-
-for(i in 1:n){
-  set.seed(n)
-  
-  yearly_model <- predict_RF_grime(data_model)
-  vals <- yearly_model[[2]] %>%
-    extract_fit_parsnip() %>% 
-    vi()
-  
-  var_imp_repeated <- var_imp_repeated %>% 
-    bind_rows(vals)
-  print(i)
-}
- 
-ggplot(var_imp_repeated, 
-       aes(x=Importance, 
+yearly_model[[2]] %>%
+  extract_fit_parsnip() %>% 
+  vi() %>% 
+  filter(Importance >.2) %>% 
+  ggplot( aes(x=Importance, 
            y= reorder(Variable, Importance, FUN = stats::median)))+
-  geom_violin(draw_quantiles = 0.5, color = "gray80", fill="red4",
-              scale = "width")+
-  theme_bw()
+  geom_col( color = "gray80", fill="red4")+
+  theme_bw()+
+  labs(y="")
 
-
+#partial dependence plots 
 rf_fit <- yearly_model[[2]] %>% 
   fit(data = yearly_model[[3]])
 
@@ -417,13 +399,12 @@ explainer_rf <- explain_tidymodels(
   label = "random forest"
 )
 
-
 pdp_rf <- model_profile(explainer_rf, N = 1000)
 
 plot(pdp_rf)
 
 
-#plot them 
+#observation vs predictions 
 yearly_preds %>% 
 ggplot( aes(.pred, Log_CH4mean))+
   geom_point(alpha=.6)+
@@ -432,8 +413,15 @@ ggplot( aes(.pred, Log_CH4mean))+
   labs(x="CH4 predictions", y="CH4 observations", title="one model for all data")+
   theme_bw()
 
-#ggsave(filename= "figures/model_perf_yearly.png", width = 12, height = 8)
+ggsave(filename= "figures/model_perf_yearly.png", width = 12, height = 8)
 
+#residuals
+yearly_preds %>% 
+  ggplot( aes(.pred, Log_CH4mean-.pred))+
+  geom_point()+
+  geom_hline(yintercept = 0, lineetyoe=2)+
+  labs(x="CH4 predictions", y="Residuals")+
+  theme_bw()
 
 # 3. Predict values to the whole world ----
 
