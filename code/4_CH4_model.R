@@ -41,7 +41,6 @@ grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attribut
   filter(`Aggregated?` == "No",
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
   mutate(forest = ifelse(cover_cls == "Forest", 1, 0),
-         water = ifelse(cover_cls == "Forest", 1, 0),
          other_nat_veg = ifelse(cover_cls == "Other natural vegetation", 1, 0),
          cropland = ifelse(cover_cls == "Cropland", 1, 0),
          urban = ifelse(cover_cls == "Urban", 1, 0),
@@ -77,6 +76,13 @@ grimeDB_attributes %>%
 vars_to_log <- c('CH4mean','uparea','popdens','slop','S_CACO3','S_CASO4' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 
                   'k_month', 'gw_month', 'wetland',  'S_ESP', 'T_ESP' )
 
+# Select useful variables for the model, some variables were removed due to a high correlation with other ones 
+variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",
+                         'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
+                         'Log_S_CASO4', 'Log_S_CASO4', "S_GRAVEL", "Log_S_CACO3" , "Log_S_ESP",
+                         "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY" )
+
+
 #dataset with some variables log transformed
 grimeDB_attr_trans <- grimeDB_attributes %>%
   #group_by(Site_Nid) %>% # this was to check if grouping by sites (collapsing temporal variability) changes things. It does
@@ -84,9 +90,30 @@ grimeDB_attr_trans <- grimeDB_attributes %>%
   mutate(across(.cols=all_of(vars_to_log), ~log(.x+.01))) %>%  #log transform those variables, shift a bit from 0 as well
   rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
+grimeDB_attr_trans %>% 
+  select(-all_of(variables_to_remove)) %>% 
+  colnames(.)
+
+labeller_vars <-  c("Log_CH4mean" = "Log CH4 (umol/L)", "month"= "month", "NPP_yr" = "NPP (yearly)", "elev" = "elevation (m)",
+                    "Log_slop" = "Log slope (unitless)", "Log_popdens" = "Log population density (people km2)", "temp_yr" = "Avg yearly temperature (°C)",
+                    "prec_yr" = "Average yearly precipitation (mm)", "T_GRAVEL" = "Sil gravel (%)", "T_SAND"='Soil sand (%w)',
+                    "T_SILT" ='Soil silt (%w)', "T_CLAY"='Soil clay (%w)', "pyearRS" = "Total yearly soil respiration",
+                    "Log_T_OC" = "Log Total organic Carbon", "Log_T_CACO3" = "Log CACO3 (%w)" , "Log_T_CASO4" = "Log CASO4 (%w)",
+                    "Log_T_ESP" = "Sodicity (%)", "S_PH_H2O" = "Soil pH", "T_CEC_SOIL" = "Soil cation exchange capacity",
+                    "S_BS" = "Base saturation", "S_TEB" = "Soil TEB", "T_BULK_DENSITY" = "Soil bulk density", "Log_uparea" ="Log Catchment area",
+                    "Log_wetland" ="Log wetland cover (%)", "trees" = "Tree cover (%)", "Log_gw_month" ="Log groundwater table depth (m)" ,
+                    "Log_k_month" = "Log gas transfer velocity (m/d)", "gpp_month" = "Monthly GPP", "precip_month" = "Monthly precipitation",
+                    "tavg_month" = "Monthly temperature", "sresp_month" = "Soil respiration", "other_nat_veg" = "Other land cover (yes/no)",
+                    "cropland" = "Cropland land cover (yes/no)", "urban" = "Urban land cover (yes/no)",
+                    "sparse_veg"= "Sparse vegetation land cover (yes/no)" , "wetland_class"= "Wetland land cover (yes/no)",
+                    "ice"= "Ice land cover (yes/no)", "water_class" = "Water land cover (yes/no)" )
+
+
+
 #Do again some histograms with the log transformed variables
 # some variables are still very skewed, usually the anthropogenic predictors that have lots of 0s
 grimeDB_attr_trans %>% 
+  select(-all_of(variables_to_remove)) %>% 
   pivot_longer(cols = everything(), names_to = "predictor", values_to = "value" ) %>% 
   ggplot(aes(value))+
     geom_histogram(bins = 80) +
@@ -141,12 +168,6 @@ vars_for_plot <- corr_ch4 %>%
 
 # 2.  RF model using tidymodels ----
  
-# Select useful variables for the model, some variables were removed due to a high correlation with other ones 
-variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS',"pyearRH",
-                         'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
-                         'Log_S_CASO4', 'Log_S_CASO4')
- 
-
 #Links I have been looking at for this: 
 # https://www.tidymodels.org/start/recipes/
 # https://juliasilge.com/blog/sf-trees-random-tuning/
