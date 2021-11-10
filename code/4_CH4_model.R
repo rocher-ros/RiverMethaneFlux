@@ -457,7 +457,6 @@ drive_download( file="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attribut
 
 global_preds <- read_csv( "data/processed/grade_attributes.csv") %>% 
   mutate(forest = ifelse(cover_cls == "Forest", 1, 0),
-         water = ifelse(cover_cls == "Forest", 1, 0),
          other_nat_veg = ifelse(cover_cls == "Other natural vegetation", 1, 0),
          cropland = ifelse(cover_cls == "Cropland", 1, 0),
          urban = ifelse(cover_cls == "Urban", 1, 0),
@@ -465,20 +464,24 @@ global_preds <- read_csv( "data/processed/grade_attributes.csv") %>%
          wetland_class =ifelse(cover_cls == "Wetland", 1, 0),
          ice = ifelse(cover_cls == "Snow/ice", 1, 0),
          water_class = ifelse(cover_cls == "Water", 1, 0)) %>% 
-  dplyr::select( -COMID,  -cover, -cover_cls)
+  dplyr::select(   -cover, -cover_cls)
 
 vars_to_log_glob <-  global_preds %>% 
-  select(contains(c("uparea", "popdens", "slop", "S_CACO3",  "T_OC" ,
-                    "T_CACO3", "T_CASO4", "k_", "gw_", "wetland",  "S_ESP", "T_ESP"),
+  select(contains(c("uparea", "popdens", "slop",  "T_OC" ,
+                    "T_CACO3", "T_CASO4", "k_", "gw_", "wetland",   "T_ESP"),
                   ignore.case = FALSE), -wetland_class) %>%
   colnames(.)
  
 
 vars_to_remove <-  global_preds %>% 
-  select(contains(c('GPP_yr', 'S_OC', 'T_PH_H2O', 'T_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', 'pyearRS',"pyearRH",
-                    'pyearRS', 'npp_', 'forest',  'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY','S_CASO4'),
+  select(contains(c('GPP_yr', 'S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",
+                     'npp_', 'forest',  'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
+                     'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP",
+  "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY"),
                   ignore.case = FALSE)) %>%
   colnames(.)
+
+
 
 #do same transformations to the global dataset
 global_preds_trans <- global_preds %>%
@@ -520,7 +523,7 @@ ch4_nov <- predict_methane(monthly_models, 11, global_preds_trans)
 ch4_dec <- predict_methane(monthly_models, 12, global_preds_trans)
 
 
-dat_out <- global_preds_trans %>% select(COMID, temp_yr) %>% 
+dat_out <- global_preds_trans %>% select(COMID) %>% 
   bind_cols(ch4_jan, ch4_feb, ch4_mar, ch4_apr, ch4_may, ch4_jun,
             ch4_jul, ch4_aug, ch4_sep, ch4_oct, ch4_nov, ch4_dec) %>% 
   mutate(across(starts_with("ch4"), exp))
