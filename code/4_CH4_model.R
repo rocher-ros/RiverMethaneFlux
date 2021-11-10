@@ -73,14 +73,15 @@ grimeDB_attributes %>%
 
 
 # we will log transform those to start with
-vars_to_log <- c('CH4mean','uparea','popdens','slop','S_CACO3','S_CASO4' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 
-                  'k_month', 'gw_month', 'wetland',  'S_ESP', 'T_ESP' )
+vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
+                 'T_ESP', "N_groundwater_agri", "N_groundwater_nat", "N_aquaculture", "N_deposition_water", "N_gnpp",
+                 "N_load", "N_point", "N_retention_subgrid", "N_surface_runoff_agri", "N_surface_runoff_nat", "P_aquaculture",
+                 "P_gnpp", "P_background", "P_load", "P_point", "P_surface_runoff_agri", "P_surface_runoff_nat", "P_retention_subgrid")
 
 # Select useful variables for the model, some variables were removed due to a high correlation with other ones 
 variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",
                          'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
-                         'Log_S_CASO4', 'Log_S_CASO4', "S_GRAVEL", "Log_S_CACO3" , "Log_S_ESP",
-                         "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY" )
+                         'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY" )
 
 
 #dataset with some variables log transformed
@@ -297,7 +298,7 @@ final_res %>%
 #with the tuned parameters obtained with thw whole dataset
 # ref: https://stackoverflow.com/questions/62687664/map-tidymodels-process-to-a-list-group-by-or-nest
 
-#Custom function to map it over month, wwith the paramaters obtained from the tuning
+#Custom function to map it over month, with the parameters obtained from the tuning
 #setup of the RF model
 rf_mod <-
   rand_forest(
