@@ -134,6 +134,9 @@ land <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "la
 
 colnames(land)
 
+nutrients_water <- read_csv("data/raw/gis/GRADES_attributes/nutrients_water.csv")
+colnames(nutrients_water)
+
 #read coordinates from grades
 grades_latlon <-  read_csv("data/raw/gis/GRADES_attributes/grades_lat_lon.csv") %>% 
   select(COMID, lat, lon)
@@ -166,11 +169,9 @@ conc_df_comids <- conc_df %>%
   drop_na(CH4mean)
 
 # Gw has some gaps, fix it
-
 grades_gw_sf <- grades_latlon %>% 
   left_join(gwTable, by="COMID") %>% 
-  st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
-  st_transform("+proj=eqearth +wktext") 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326) 
 
 #get the sites with gaps and no gaps in separate df
 gw_withdata <-  grades_gw_sf %>% 
@@ -209,6 +210,7 @@ grades_attributes <-  grades_latlon %>%
   left_join(uparea, by ="COMID") %>% 
   left_join(wetland, by ="COMID") %>% 
   left_join(land, by ="COMID") %>% 
+  left_join(nutrients_water, by ="COMID") %>% 
   mutate(across(where(is.numeric), ~na_if(., -Inf))) %>% 
   mutate(across(where(is.numeric), ~na_if(., Inf))) %>% 
   drop_na(elev)
