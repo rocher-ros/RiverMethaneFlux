@@ -6,7 +6,7 @@
 
 # 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip', 'corrr', 'ggpubr')
+package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip', 'corrr', 'ggpubr', 'DALEXtra')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -431,7 +431,7 @@ explainer_rf <- explain_tidymodels(
   label = "random forest"
 )
 
-pdp_rf <- model_profile(explainer_rf, N = 1000)
+pdp_rf <- model_profile(explainer_rf, N = 10000)
 
 plot(pdp_rf)
 
@@ -468,8 +468,9 @@ global_preds <- read_csv( "data/processed/grade_attributes.csv") %>%
   dplyr::select(   -cover, -cover_cls)
 
 vars_to_log_glob <-  global_preds %>% 
-  select(contains(c("uparea", "popdens", "slop",  "T_OC" ,
-                    "T_CACO3", "T_CASO4", "k_", "gw_", "wetland",   "T_ESP"),
+  select(contains(c("uparea", "popdens", "slop",  "T_OC" ,"T_CACO3", "T_CASO4", "k_", "gw_", "wetland",   "T_ESP",
+                    "N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture", "P_gnpp", 
+                    "P_background", "P_load", "P_point", "P_surface_runoff_agri", "P_surface_runoff_nat", "P_retention_subgrid"),
                   ignore.case = FALSE), -wetland_class) %>%
   colnames(.)
  
@@ -477,8 +478,8 @@ vars_to_log_glob <-  global_preds %>%
 vars_to_remove <-  global_preds %>% 
   select(contains(c('GPP_yr', 'S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",
                      'npp_', 'forest',  'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
-                     'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP",
-  "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY"),
+                     'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY",
+                    "N_aquaculture", "N_gnpp", "N_load", "N_point", "N_retention_subgrid",  "N_surface_runoff_agri", "N_surface_runoff_nat"),
                   ignore.case = FALSE)) %>%
   colnames(.)
 
@@ -488,7 +489,7 @@ vars_to_remove <-  global_preds %>%
 global_preds_trans <- global_preds %>%
   mutate(across(.cols=all_of(vars_to_log_glob), ~log(.x+.01))) %>%  #log transform those variables, shift a bit from 0 as well
   rename_with( ~str_c("Log_", all_of(vars_to_log_glob)), .cols = all_of(vars_to_log_glob) )  %>% #rename the log transformed variables 
-  select(-vars_to_remove) %>% 
+  select(-all_of(vars_to_remove)) %>% 
   drop_na()
 
 colnames(global_preds_trans)
