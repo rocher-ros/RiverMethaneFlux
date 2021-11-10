@@ -529,3 +529,7 @@ dat_out <- global_preds_trans %>% select(COMID) %>%
   mutate(across(starts_with("ch4"), exp))
 
 write_csv(dat_out, "data/processed/meth_predictions.csv")
+
+drive_upload(media = "data/processed/meth_predictions.csv",
+             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/meth_predictions.csv",
+             overwrite = TRUE)
