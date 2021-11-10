@@ -74,14 +74,14 @@ grimeDB_attributes %>%
 
 # we will log transform those to start with
 vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
-                 'T_ESP', "N_groundwater_agri", "N_groundwater_nat", "N_aquaculture", "N_deposition_water", "N_gnpp",
-                 "N_load", "N_point", "N_retention_subgrid", "N_surface_runoff_agri", "N_surface_runoff_nat", "P_aquaculture",
+                 'T_ESP', "N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture",
                  "P_gnpp", "P_background", "P_load", "P_point", "P_surface_runoff_agri", "P_surface_runoff_nat", "P_retention_subgrid")
 
 # Select useful variables for the model, some variables were removed due to a high correlation with other ones 
 variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",
                          'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
-                         'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY" )
+                         'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY",
+                         "N_aquaculture", "N_gnpp", "N_load", "N_point", "N_retention_subgrid",  "N_surface_runoff_agri", "N_surface_runoff_nat" )
 
 
 #dataset with some variables log transformed
@@ -397,18 +397,28 @@ yearly_model <- predict_RF_grime(data_model)
 
 yearly_preds <- yearly_model[1] %>% as.data.frame()
 
-yearly_train <- yearly_model[[3]]
-
-
 yearly_model[[2]] %>%
   extract_fit_parsnip() %>% 
   vi() %>% 
-  filter(Importance >.2) %>% 
+  filter(Importance >.23) %>% 
   ggplot( aes(x=Importance, 
            y= reorder(Variable, Importance, FUN = stats::median)))+
   geom_col( color = "gray80", fill="red4")+
   theme_bw()+
   labs(y="")
+
+ggsave(filename = "figures/VIP_scores_mean.png")
+
+#observation vs predictions 
+yearly_preds %>% 
+  ggplot( aes(.pred, Log_CH4mean))+
+  geom_point(alpha=.6)+
+  geom_abline(slope=1, intercept = 0)+
+  stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
+  labs(x="CH4 predictions", y="CH4 observations", title="one model for all data")+
+  theme_bw()
+
+ggsave(filename= "figures/model_perf_yearly.png", width = 12, height = 8)
 
 #partial dependence plots 
 rf_fit <- yearly_model[[2]] %>% 
@@ -425,17 +435,7 @@ pdp_rf <- model_profile(explainer_rf, N = 1000)
 
 plot(pdp_rf)
 
-
-#observation vs predictions 
-yearly_preds %>% 
-ggplot( aes(.pred, Log_CH4mean))+
-  geom_point(alpha=.6)+
-  geom_abline(slope=1, intercept = 0)+
-  stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
-  labs(x="CH4 predictions", y="CH4 observations", title="one model for all data")+
-  theme_bw()
-
-ggsave(filename= "figures/model_perf_yearly.png", width = 12, height = 8)
+ggsave(filename= "figures/partial_depend.png", width = 12, height = 8)
 
 #residuals
 yearly_preds %>% 

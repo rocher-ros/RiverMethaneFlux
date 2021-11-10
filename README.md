@@ -30,7 +30,7 @@ The random forest model seems to do OK, with an average $R^{2}= 0.5$. Next figur
 
 ![](figures/model_perf_monthly.png)
 
-The most important variable by far is the depth to groundwater table, followed by temperature and elevation.
+The most important variable by far is the depth to groundwater table, followed by P runoff and elevation.
 
 ![](figures/VIP_scores_mean.png)
 
