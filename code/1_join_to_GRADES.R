@@ -18,14 +18,14 @@ lapply(package_list, require, character.only = TRUE)
 ## Prepare the things for the download ----
 dir.create("data/raw/grades")
 
-url = "http://hydrology.princeton.edu/data/mpan/MERIT_Basins/MERIT_Hydro_v07_Basins_v01_bugfix1/pfaf_level_01/"
+url = "http://hydrology.princeton.edu/data/mpan/MERIT_Basins/MERIT_Hydro_v00_Basins_v01/level_01/"
 #check that it is the right folder
 browseURL(url)
 
 #get the urls of the files
 files <- getHTMLLinks(url)
 
-files <- files[grepl("^cat|^riv.", files)]
+files <- files[grepl("cat|riv.", files)]
 
 
 ## Download GRADES river network to the local file. it takes over 2h.----
@@ -61,7 +61,8 @@ load(file.path("data", "raw", "MethDB_tables_converted.rda"))
 
 #select the sites, and make a new column to get the continent name. This will be the way to break the processing in pieces
 sites_meth <- gis_df %>% 
-  dplyr::select(Site_Nid, lat=lat_new, lon=lon_new, elevation_m =z_m_combined, country=countries_sub) %>% 
+  dplyr::select(Site_Nid, lat, lon, elevation_m =z_m_combined, country=countries_sub) %>%
+  drop_na(lat) %>% 
   mutate(continent =  countrycode(sourcevar = country,
                                   origin = "country.name",
                                   destination = "continent"),
@@ -381,7 +382,7 @@ grades_properties <- grades %>%
          lon = sf::st_coordinates(start_point)[,1],
          lat = sf::st_coordinates(start_point)[,2]) %>% 
   st_drop_geometry() %>% 
-  select(COMID, lengthkm, slope, uparea, NextDownID, lat, lon)
+  dplyr::select(COMID, lengthkm, slope, uparea, NextDownID, lat, lon)
 
 write_csv(grades_properties, "data/raw/gis/GRADES_attributes/grades_lat_lon.csv")
 
