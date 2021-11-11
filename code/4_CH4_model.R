@@ -40,18 +40,10 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
   filter(`Aggregated?` == "No",
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
-  mutate(forest = ifelse(cover_cls == "Forest", 1, 0),
-         other_nat_veg = ifelse(cover_cls == "Other natural vegetation", 1, 0),
-         cropland = ifelse(cover_cls == "Cropland", 1, 0),
-         urban = ifelse(cover_cls == "Urban", 1, 0),
-         sparse_veg = ifelse(cover_cls == "Bare area/Sparse vegetation", 1, 0),
-         wetland_class =ifelse(cover_cls == "Wetland", 1, 0),
-         ice = ifelse(cover_cls == "Snow/ice", 1, 0),
-         water_class = ifelse(cover_cls == "Water", 1, 0),
-         month=month(date)) %>% 
-  dplyr::select( COMID, Site_Nid, CH4mean, month, GPP_yr:water_class,
+  mutate( month=month(date)) %>% 
+  dplyr::select( COMID, Site_Nid, CH4mean, month, GPP_yr:month,
           -c(Channel_type, `Aggregated?`, date_end, date, area, T_ECE, S_ECE, 
-             temp_month, WaterTemp_actual, WaterTemp_est, discharge_measured, cover, cover_cls)) 
+             temp_month, WaterTemp_actual, WaterTemp_est, discharge_measured)) 
 
 colnames(grimeDB_attributes)
   
@@ -88,7 +80,7 @@ variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S
 grimeDB_attr_trans <- grimeDB_attributes %>%
   #group_by(Site_Nid) %>% # this was to check if grouping by sites (collapsing temporal variability) changes things. It does
   #summarise(across(everything(), mean, na.rm=TRUE)) %>% 
-  mutate(across(.cols=all_of(vars_to_log), ~log(.x+.01))) %>%  #log transform those variables, shift a bit from 0 as well
+  mutate(across(.cols=all_of(vars_to_log), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
   rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
 grimeDB_attr_trans %>% 
@@ -147,25 +139,26 @@ corr_ch4 %>%
 vars_for_plot <- corr_ch4 %>% 
   arrange(desc(abs(Log_CH4mean))) %>% 
   mutate(predictor=fct_reorder(term, desc(abs(Log_CH4mean)))) %>% 
-  select(-term)
+  select(-term) %>% 
+  filter(!predictor %in% c("COMID", "Site_Nid", "month"))
 
 
 #scatter plots of all variables, sorted from highest to lower r. 
-# Showing a loess fit to capture potential nonlinearities that might be useful to assess
+# Showing a loess fit to capture potential nonlinearities that might be useful to assess. don't run it often as it takes a while...
  plot_correlations <- grimeDB_attr_trans %>% 
-  pivot_longer(-LogCH4mean, names_to = "predictor", values_to = "value" ) %>% 
+  pivot_longer(all_of(vars_for_plot$predictor), names_to = "predictor", values_to = "value" ) %>% 
   mutate(predictor=fct_relevel(predictor, levels(vars_for_plot$predictor))) %>% 
-  ggplot(aes(value, LogCH4mean))+
+  ggplot(aes(value, Log_CH4mean))+
   geom_hex(bins = 30) +
   geom_smooth(method = "loess", se=FALSE, color="red3")+
   geom_text( data = vars_for_plot, 
-             mapping = aes(x = Inf, y = Inf, label = paste("r=",round(LogCH4mean,2))), hjust   = 3.5, vjust   = 1.5, color="red")+
+             mapping = aes(x = Inf, y = Inf, label = paste("r=",round(Log_CH4mean,2))), hjust   = 3.5, vjust   = 1.5, color="red")+
   theme_classic()+
   scale_fill_continuous(type = "viridis", trans = "log10")+
   facet_wrap(~predictor, scales='free')
 
  
-#ggsave(filename= "figures/correlations.png", plot=plot_correlations, width = 18, height = 12)
+ggsave(filename= "figures/correlations.png", plot=plot_correlations, width = 18, height = 12)
 
 # 2.  RF model using tidymodels ----
  
@@ -175,7 +168,7 @@ vars_for_plot <- corr_ch4 %>%
 # https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/
 
 
-## parameter tuning  for the RF, takes several hours so welcome to skip it ----
+##2.1 parameter tuning  for the RF, takes several hours so welcome to skip it ----
 ## First run will be with the model with average values by site, to see the broad performance and tune RF parameters
  #remove variables that are highly correlated
  data_for_model <-  grimeDB_attr_trans %>% 
@@ -294,7 +287,7 @@ final_res %>%
   collect_metrics()
 
 
-##  Run the models ----
+## 2.2  Run the models ----
 #with the tuned parameters obtained with thw whole dataset
 # ref: https://stackoverflow.com/questions/62687664/map-tidymodels-process-to-a-list-group-by-or-nest
 
@@ -386,6 +379,7 @@ a <-   predict(monthly_models$model_fit[[1]], test_df) %>%
   bind_cols(test_df)
 
 ## run the data on the whole dataset, not nesting by month ----
+
 data_model <- grimeDB_attr_trans %>%
   select(-all_of(variables_to_remove)) %>% 
   drop_na()
