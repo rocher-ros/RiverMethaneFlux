@@ -1,6 +1,6 @@
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive', 'ncdf4', 'raster', 'sf',  'velox', 'tictoc', 'tmap', 'exact_extract')
+package_list <- c('tidyverse', 'googledrive', 'ncdf4', 'raster', 'sf',  'velox', 'tictoc', 'tmap')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -317,12 +317,19 @@ for(i in 1:9){
 
   grades_land <- st_join(land, grades) %>% 
     st_drop_geometry() %>%
-    drop_na(COMID)
+    drop_na(COMID) %>% 
+    arrange(COMID)
   
-  dat_out <- grades_land %>% 
+  dat_out <- 
+    grades_land %>% 
     group_by(COMID) %>%
-    summarise(cover = mode(cover) %>% as.character(),
-              cover_cls = mode(cover_cls) %>%  as.character(),
+    summarise(water=sum(cover_cls == "Water")/n()*100,
+              cropland=sum(cover_cls == "Cropland")/n()*100,
+              forest=sum(cover_cls == "Forest")/n()*100,
+              wetland=sum(cover_cls == "Wetland")/n()*100,
+              other_nat_veg=sum(cover_cls == "Other natural vegetation")/n()*100,
+              bare_sparse=sum(cover_cls == "Bare area/Sparse vegetation")/n()*100,
+              urban=sum(cover_cls == "Urban")/n()*100,
               trees = mean(trees, na.rm=TRUE)) 
   
   dat_out %>% 
@@ -330,6 +337,7 @@ for(i in 1:9){
   
   rm(grades_land, grades, dat_out)
   gc()
+  print(paste("done", i))
 
 }
 
@@ -370,9 +378,9 @@ p_stack <- terra::rast(files_phosphorus)
 
 plot(n_stack[[2]])
 
-sf::sf_use_s2(FALSE)
 
-grades <- read_csv("data/raw/gis/GRADES_attributes/grades_lat_lon.csv") %>% 
+
+grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
   st_as_sf( coords = c("lon", "lat"),  crs = 4326)
   
 
@@ -388,10 +396,10 @@ colnames(p_vals) <- c("P_aquaculture", "P_gnpp", "P_background", "P_load" , "P_p
 
 dat_out <- bind_cols(grades, n_vals, p_vals)
   
-dat_out %>% dplyr::select(-lengthkm, -slope, -uparea, -NextDownID) %>% 
+dat_out %>% dplyr::select( -slope, -uparea, -Length) %>% 
   st_drop_geometry() %>% 
   write_csv(file="data/raw/gis/GRADES_attributes/nutrients_water.csv")
   
-  rm( grades, dat_out)
-  gc()
+rm( grades, dat_out)
+gc()
   

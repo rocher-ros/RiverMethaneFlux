@@ -44,13 +44,10 @@ hydroBasinID_nobasin <-
 hydroBasinID <- rbind(hydroBasinID, hydroBasinID_nobasin)
 rm(hydroBasinID_nobasin)
 
-hydroBasinSN <-
-  read_csv("data/raw/gis/upscaling_vars/hydrobasin4_hemisNS.csv",
-           col_types = 'cc')
+hydroBasinSN <-  read_csv("data/raw/gis/upscaling_vars/hydrobasin4_hemisNS.csv", col_types = 'cc')
 
-runoff <-
-  read_csv("data/raw/gis/upscaling_vars/runoffhydrobasin4.csv",
-           col_types = 'cn')
+runoff <- read_csv("data/raw/gis/upscaling_vars/runoffhydrobasin4.csv", col_types = 'cn') %>% 
+  drop_na()
 
 runoff <- runoff[!is.na(runoff$runoff), ]
 

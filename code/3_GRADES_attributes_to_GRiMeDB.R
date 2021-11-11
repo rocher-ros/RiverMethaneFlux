@@ -15,6 +15,7 @@ lapply(package_list, require, character.only = TRUE)
 # download the grade attributes to the local copy 
 dir.create("data/raw/gis/GRADES_attributes") 
 grades_in_drive <- drive_ls("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes")
+
 #get the file paths for drive and locally
 names_in_drive <- paste("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes", grades_in_drive$name, sep="/") 
 names_destination <- paste("data/raw/gis/GRADES_attributes", grades_in_drive$name, sep="/") 
@@ -96,8 +97,8 @@ colnames(monTemp) <- c("COMID", "temp_jan", "temp_feb", "temp_mar", "temp_apr", 
 
 popdens <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "popdens", full.names = TRUE), read_csv) %>% 
   bind_rows() %>% 
-  mutate(  popdens= rowMeans(select(., `2000`:`2015`))) %>% 
-  select(COMID, popdens)
+  mutate(  popdens= rowMeans(dplyr::select(., `2000`:`2015`))) %>% 
+  dplyr::select(COMID, popdens)
 
 colnames(popdens) 
 
@@ -130,7 +131,7 @@ colnames(wetland)
 
 land <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "landcover", full.names = TRUE), read_csv) %>% 
   bind_rows() %>% 
-  dplyr::select(COMID, cover, cover_cls, trees)
+  dplyr::rename(wetland_cover=wetland)
 
 colnames(land)
 
@@ -138,8 +139,8 @@ nutrients_water <- read_csv("data/raw/gis/GRADES_attributes/nutrients_water.csv"
 colnames(nutrients_water)
 
 #read coordinates from grades
-grades_latlon <-  read_csv("data/raw/gis/GRADES_attributes/grades_lat_lon.csv") %>% 
-  select(COMID, lat, lon)
+grades_latlon <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  dplyr::select(COMID, lat, lon)
 
 ## Now get GRiMeDB ----
 load(file.path("data", "raw", "MethDB_tables_converted.rda"))
@@ -163,7 +164,7 @@ sites_clean <- sites_df %>%
 conc_df_comids <- conc_df %>% 
   filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
   left_join(sites_clean, by="Site_Nid") %>% 
-  select(Site_Nid, `Aggregated?`, Channel_type, COMID,  order, distance_snapped, slope_m_m, CH4mean, CO2mean,
+  dplyr::select(Site_Nid, `Aggregated?`, Channel_type, COMID, distance_snapped, slope_m_m, CH4mean, CO2mean,
          date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  ) %>% 
   mutate(CH4mean =ifelse(CH4mean < 0, 0.0001, CH4mean)) %>% 
   drop_na(CH4mean)
@@ -180,13 +181,13 @@ gw_withdata <-  grades_gw_sf %>%
 
 gw_missing <- grades_gw_sf %>%
   filter_all(any_vars(is.na(.))) %>% 
-  select(COMID)
+  dplyr::select(COMID)
 
 #find nearest point with data
 nearest <- st_nearest_feature(gw_missing, gw_withdata)
 
 gw_filled <- cbind(gw_missing, st_drop_geometry(gw_withdata)[nearest,]) %>% 
-  select(-COMID.1)
+  dplyr::select(-COMID.1)
 
 
 #join with both filled datasets
