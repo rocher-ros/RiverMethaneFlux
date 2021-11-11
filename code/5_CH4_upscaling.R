@@ -125,7 +125,7 @@ for (i in 1:8) {
     )
   dbf <- dbf[, !(names(dbf) %in% paste0(month.abb, 'Qstd'))]
   uparea <-
-    read_csv(paste0(wd, '/output/table/MeritHydro/uparea_0', i, '.csv'))
+    read_csv(paste0('data/raw/gis/GRADES_attributes/uparea_0', i, '.csv'))
   dbf <- left_join(dbf, uparea[, c('COMID', 'uparea')], by = 'COMID')
   
   #join HYBAS_ID
@@ -156,7 +156,7 @@ for (i in 1:8) {
   dbf<-dbf%>%mutate(wkbasin=paste0(Hemis,Qlevel,substr(frclass,4,6)))
   
   #temp
-  temp<-read_csv(paste0(wd,'/output/table/MeritHydro/monTemp_0',i,'.csv'))
+  temp<-read_csv(paste0('data/raw/gis/GRADES_attributes/monTemp_0',i,'.csv'))
   colnames(temp)[2:13]<-paste0(month.abb,'_Ta')
   #calc tw
   temp[,paste0(month.abb,'_Tw')]<-sapply(temp[2:13],function(x){tw=0.67*x+7.45})
