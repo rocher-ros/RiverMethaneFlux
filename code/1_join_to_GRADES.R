@@ -382,7 +382,7 @@ grades_properties <- grades %>%
          lon = sf::st_coordinates(start_point)[,1],
          lat = sf::st_coordinates(start_point)[,2]) %>% 
   st_drop_geometry() %>% 
-  dplyr::select(COMID, lengthkm, slope, uparea, NextDownID, lat, lon)
+  dplyr::select(COMID, Length, slope=Slope, uparea=USContArea,, lat, lon)
 
 write_csv(grades_properties, "data/raw/gis/GRADES_attributes/grades_lat_lon.csv")
 
