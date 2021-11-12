@@ -47,8 +47,7 @@ grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attribut
 
 colnames(grimeDB_attributes)
   
-ggplot(grimeDB_attributes)+
-  geom_point(aes(wetland, wetland_class))
+
 
 # Explore the raw data and process before the modelling
 
@@ -488,7 +487,7 @@ predict_methane <- function(all_models, month, global_predictors) {
   
   out <- predict(model_month, df_predictors)
   
-  colnames(out) <- paste("ch4", month_selected, sep="_")
+  colnames(out) <- paste( month.abb[month], "ch4", sep="_")
   out
 }
 
