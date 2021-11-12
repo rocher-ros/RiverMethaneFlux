@@ -47,8 +47,7 @@ grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attribut
 
 colnames(grimeDB_attributes)
   
-ggplot(grimeDB_attributes)+
-  geom_point(aes(wetland, wetland_class))
+
 
 # Explore the raw data and process before the modelling
 
@@ -375,10 +374,6 @@ ggplot( aes(.pred, Log_CH4mean))+
 ggsave(filename= "figures/model_perf_monthly.png", width = 12, height = 8)
 
 
-
-a <-   predict(monthly_models$model_fit[[1]], test_df) %>% 
-  bind_cols(test_df)
-
 ## run the data on the whole dataset, not nesting by month ----
 
 data_model <- grimeDB_attr_trans %>%
@@ -395,7 +390,7 @@ yearly_preds <- yearly_model[1] %>% as.data.frame()
 yearly_model[[2]] %>%
   extract_fit_parsnip() %>% 
   vi() %>% 
-  filter(Importance >.23) %>% 
+  filter(Importance >.13) %>% 
   ggplot( aes(x=Importance, 
            y= reorder(Variable, Importance, FUN = stats::median)))+
   geom_col( color = "gray80", fill="red4")+
@@ -451,22 +446,13 @@ drive_download( file="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attribut
                 path="data/processed/grade_attributes.csv",
              overwrite = TRUE)
 
-global_preds <- read_csv( "data/processed/grade_attributes.csv") %>% 
-  mutate(forest = ifelse(cover_cls == "Forest", 1, 0),
-         other_nat_veg = ifelse(cover_cls == "Other natural vegetation", 1, 0),
-         cropland = ifelse(cover_cls == "Cropland", 1, 0),
-         urban = ifelse(cover_cls == "Urban", 1, 0),
-         sparse_veg = ifelse(cover_cls == "Bare area/Sparse vegetation", 1, 0),
-         wetland_class =ifelse(cover_cls == "Wetland", 1, 0),
-         ice = ifelse(cover_cls == "Snow/ice", 1, 0),
-         water_class = ifelse(cover_cls == "Water", 1, 0)) %>% 
-  dplyr::select(   -cover, -cover_cls)
+global_preds <- read_csv( "data/processed/grade_attributes.csv") 
 
 vars_to_log_glob <-  global_preds %>% 
   select(contains(c("uparea", "popdens", "slop",  "T_OC" ,"T_CACO3", "T_CASO4", "k_", "gw_", "wetland",   "T_ESP",
                     "N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture", "P_gnpp", 
                     "P_background", "P_load", "P_point", "P_surface_runoff_agri", "P_surface_runoff_nat", "P_retention_subgrid"),
-                  ignore.case = FALSE), -wetland_class) %>%
+                  ignore.case = FALSE), -wetland_cover) %>%
   colnames(.)
  
 
@@ -482,7 +468,7 @@ vars_to_remove <-  global_preds %>%
 
 #do same transformations to the global dataset
 global_preds_trans <- global_preds %>%
-  mutate(across(.cols=all_of(vars_to_log_glob), ~log(.x+.01))) %>%  #log transform those variables, shift a bit from 0 as well
+  mutate(across(.cols=all_of(vars_to_log_glob), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
   rename_with( ~str_c("Log_", all_of(vars_to_log_glob)), .cols = all_of(vars_to_log_glob) )  %>% #rename the log transformed variables 
   select(-all_of(vars_to_remove)) %>% 
   drop_na()
@@ -502,7 +488,7 @@ predict_methane <- function(all_models, month, global_predictors) {
   
   out <- predict(model_month, df_predictors)
   
-  colnames(out) <- paste("ch4", month_selected, sep="_")
+  colnames(out) <- paste( month.abb[month], "ch4", sep="_")
   out
 }
 
