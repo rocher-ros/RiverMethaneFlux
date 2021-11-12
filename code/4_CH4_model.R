@@ -225,7 +225,7 @@ set.seed(345)
 tune_res <- tune_grid(
   tune_wf,
   resamples = trees_folds,
-  grid = 20
+  grid = 10
 )
 
 tune_res
@@ -233,7 +233,7 @@ tune_res
 # lets have a look...
 tune_res %>%
   collect_metrics() %>%
-  filter(.metric == "rmse") %>%
+  filter(.metric == "rsq") %>%
   select(mean, min_n, mtry) %>%
   pivot_longer(min_n:mtry,
                values_to = "value",
@@ -241,13 +241,14 @@ tune_res %>%
   ggplot(aes(value, mean, color = parameter)) +
   geom_point(show.legend = FALSE) +
   facet_wrap(~parameter, scales = "free_x") +
-  labs(x = NULL, y = "AUC")
+  labs(x = NULL, y = "rsq")
 
+rm(tune_res)
 #Do a more targeted tuning with a new grid
 rf_grid <- grid_regular(
-  mtry(range = c(20, 40)),
-  min_n(range = c(25, 40)),
-  levels = 5
+  mtry(range = c(10,20)),
+  min_n(range = c(15, 30)),
+  levels = 10
 )
 
 set.seed(456)
@@ -420,12 +421,12 @@ rf_fit <- yearly_model[[2]] %>%
 
 explainer_rf <- explain_tidymodels(
   rf_fit, 
-  data = dplyr::select(yearly_train, -Log_CH4mean), 
-  y = yearly_train$Log_CH4mean,
+  data = dplyr::select(yearly_model[[3]], -Log_CH4mean), 
+  y = yearly_model[[3]]$Log_CH4mean,
   label = "random forest"
 )
 
-pdp_rf <- model_profile(explainer_rf, N = 10000)
+pdp_rf <- model_profile(explainer_rf, N = 5000)
 
 plot(pdp_rf)
 
