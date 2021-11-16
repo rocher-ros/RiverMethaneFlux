@@ -290,11 +290,7 @@ map2(gw_to_upload, gw_path_in_drive, drive_upload)
 # Try to get land cover data into grades as well ----
 dir.create("data/raw/gis/")
 dir.create("data/raw/gis/GRADES_attributes")
-#function to get the most common value (also works on strings)
-mode <- function(x) {
-  ux <- unique(x)
-  as.character(ux[which.max(tabulate(match(x, ux)))])
-}
+
 
 #get land cover data
 data(land)
@@ -341,28 +337,51 @@ for(i in 1:9){
 
 }
 
+#check if there are sites with no values, and fill them with the nearest one
+
+land <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "landcover", full.names = TRUE), read_csv) %>% 
+  bind_rows()  %>%
+  mutate(trees=ifelse(is.na(trees) == TRUE, 0, trees)) %>% 
+  dplyr::rename(wetland_cover=wetland)
+
+grades_land <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>%
+  left_join(land, by="COMID") %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326)
+
+grades_land %>% 
+  filter(is.na(trees) == TRUE) %>% 
+  ggplot()+
+  geom_sf()
+
+
+#get the sites with gaps and no gaps in separate df
+dat_withdata <-  grades_land %>% 
+  drop_na(urban) %>% 
+  st_sf()
+
+dat_missing <- grades_land %>%
+  filter_all(any_vars(is.na(.))) %>% 
+  dplyr::select(COMID)
+
+#find nearest point with data
+nearest <- st_nearest_feature(dat_missing, dat_withdata)
+
+dat_filled <- cbind(dat_missing, st_drop_geometry(dat_withdata)[nearest,]) %>% 
+  dplyr::select(-COMID.1)
+
+dat_filled %>% 
+  filter(is.na(urban) == TRUE) 
+
+#join with both filled datasets
+dat_good <- bind_rows(dat_withdata %>% st_drop_geometry(), 
+                      dat_filled %>% st_drop_geometry())
+
+write_csv(dat_good, "data/raw/gis/GRADES_attributes/land_good.csv")
+
 #upload the file to google drive
-
-full_files <- list.files("data/raw/gis/GRADES_attributes", full.names = TRUE) 
-
-path_in_drive <- paste("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes", 
-                       list.files("data/raw/gis/GRADES_attributes"), sep="/") 
-
-land_path_in_drive <-  path_in_drive[grepl("land", path_in_drive)] 
-
-land_to_upload <-  full_files[grepl("land", full_files)] 
-
-
-map2(land_to_upload, land_path_in_drive, drive_upload)
+drive_upload("data/raw/gis/GRADES_attributes/land_good.csv", "SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes/land_good.csv")
 
 # process the nutrient data ---
-
-#get grades back in
-files <- list.files("data/raw/grades")[grepl(".shp$", list.files("data/raw/grades"))]
-
-shape_files <- paste("data/raw/grades", files[grepl(".shp$", files)], sep="/") 
-
-shapes_catchments <- shape_files[grepl("cat", shape_files)]
 
 #find the names of the nitrogen and phosphorus files
 files_nitrogen <- list.files("data/raw/gis/nutrients freshwater/nitrogen/2000/", full.names = TRUE)
@@ -376,7 +395,7 @@ n_stack = terra::rast(files_nitrogen)
 p_stack <- terra::rast(files_phosphorus)
 
 
-plot(n_stack[[2]])
+raster::plot(n_stack[[2]])
 
 
 
@@ -395,11 +414,40 @@ colnames(p_vals) <- c("P_aquaculture", "P_gnpp", "P_background", "P_load" , "P_p
                       "P_surface_runoff_nat",  "P_retention", "P_retention_subgrid")
 
 dat_out <- bind_cols(grades, n_vals, p_vals)
-  
-dat_out %>% dplyr::select( -slope, -uparea, -Length) %>% 
-  st_drop_geometry() %>% 
+
+dat_out %>% 
+  filter(is.na(N_retention_subgrid) == TRUE | is.na(P_load) == TRUE ) %>% 
+  ggplot()+
+  geom_sf()
+
+
+#get the sites with gaps and no gaps in separate df
+dat_withdata <-  dat_out %>% 
+  drop_na(N_retention_subgrid, P_load) %>% 
+  st_sf()
+
+dat_missing <- dat_out %>%
+  filter(is.na(N_retention_subgrid) == TRUE | is.na(P_load) == TRUE ) %>% 
+  dplyr::select(COMID)
+
+#find nearest point with data
+nearest <- st_nearest_feature(dat_missing, dat_withdata)
+
+dat_filled <- cbind(dat_missing, st_drop_geometry(dat_withdata)[nearest,]) %>% 
+  dplyr::select(-COMID.1)
+
+dat_filled %>% 
+  filter(is.na(N_retention_subgrid) == TRUE) 
+
+#join with both filled datasets
+dat_good <- bind_rows(dat_withdata %>% st_drop_geometry(), 
+                      dat_filled %>% st_drop_geometry())
+
+dat_good %>% dplyr::select( -slope, -uparea, -Length) %>% 
   write_csv(file="data/raw/gis/GRADES_attributes/nutrients_water.csv")
-  
-rm( grades, dat_out)
-gc()
-  
+ 
+#upload the file to google drive
+drive_upload("data/raw/gis/GRADES_attributes/nutrients_water.csv", 
+             "SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes/nutrients_water.csv")
+
+

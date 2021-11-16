@@ -25,7 +25,8 @@ lapply(package_list, require, character.only = TRUE)
 
 
 #read coordinates from grades
-grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv")
+grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  select(COMID, lon, lat)
 
 #read hydrobasin 
 hydroBasinID <-
@@ -90,7 +91,7 @@ qStatsExt <- function(nc,statsNm){
 # Concentrations (mole fraction, also ppmv) in the atmosphere are approximate for 2013, should be updated over time
 # AtmP is in (atmospheres)
 
-getSaturation <- function(temperature, elevation){
+get_CH4eq <- function(temperature, elevation){
   
   pressure <- (1-(.0000225577*elevation))^5.25588
   Kh <- (1.4*10^-3)*exp(1700*((1/temperature)-(1/298)))
@@ -207,9 +208,19 @@ colnames(df)
 meth_concs <- read_csv("data/processed/meth_predictions.csv")
 
 df <- df %>% 
-  left_join(meth_concs, by="COMID")
-
-
+  left_join(meth_concs, by="COMID") %>% 
+  mutate(Jan_ch4eq = get_CH4eq(Jan_Tw + 273.15, elev),
+         Feb_ch4eq = get_CH4eq(Feb_Tw + 273.15, elev),
+         Mar_ch4eq = get_CH4eq(Mar_Tw + 273.15, elev),
+         Apr_ch4eq = get_CH4eq(Apr_Tw + 273.15, elev),
+         May_ch4eq = get_CH4eq(May_Tw + 273.15, elev),
+         Jun_ch4eq = get_CH4eq(Jun_Tw + 273.15, elev),
+         Jul_ch4eq = get_CH4eq(Jul_Tw + 273.15, elev),
+         Aug_ch4eq = get_CH4eq(Aug_Tw + 273.15, elev),
+         Sep_ch4eq = get_CH4eq(Sep_Tw + 273.15, elev),
+         Oct_ch4eq = get_CH4eq(Oct_Tw + 273.15, elev),
+         Nov_ch4eq = get_CH4eq(Nov_Tw + 273.15, elev),
+         Dec_ch4eq = get_CH4eq(Dec_Tw + 273.15, elev))
 
 
 df[df$COMID == 61000003, ]$uparea <- 35
@@ -221,13 +232,14 @@ rm(hydroBasinID,runoff,dbf,qStatsNC,i,temp,
    qAnnStatsNC,Qquantiles, meth_concs)
 
 
+
 df[df$yeaQcv <= quantile(df$yeaQcv, 0.001), ]$yeaQcv <-
   quantile(df$yeaQcv, 0.001) #0.4,min:0.08
 df[df$yeaQcv >= quantile(df$yeaQcv, 0.995), ]$yeaQcv <-
   quantile(df$yeaQcv, 0.995) #16.7,max:10
 
 #calc annual mean width
-df<- df %>% 
+df <- df %>% 
   mutate(
     yeaWidth = case_when(
       Qlevel %in% c('ARID') ~ exp(2.1 + 0.43 * log(yeaQmean)),
@@ -290,12 +302,12 @@ df <- df[!df$wkbasin %in% c('NARID15'),] #there is only one flowline, caused by 
 timedryout_calculater <- function(Q) {
   tdryout = 1 / (1 + exp(11 + 4 * log(Q)))
   
-  tdryout
+
 }
 
 #calculate timedryout
 df <- df %>% 
-  mutate(across(ends_with("Qmean"), timedryout_calculater, .names = "{.col}_timedryout" )) %>% 
+  mutate(across(ends_with("Qmean"), timedryout_calculater, .names = "{.col}timedryout" )) %>% 
   rename_at(vars(ends_with('timedryout')), ~ str_remove(., "Qmean")) 
 
 
@@ -333,181 +345,212 @@ rm(prectemp)
 ####stream order extrapolation and surface area calculation####
 for(i in 1:78){
   print(paste0('Processing the ', i, ' basin ...'))
-  df_basin <- df[df$wkbasin %in% wkbasins[i, ]$wkbasin, ]
+  
+  df_basin <- df %>% 
+    filter(wkbasin ==  wkbasins[i, ]$wkbasin ) 
+  
   for (Mon in month.abb){
     print(Mon)
-    widthNM <- paste0(Mon, 'Width')
-    dryoutNM <- paste0(Mon, 'timedryout')
-    precNM <- paste0(Mon, '_prec')
-    tempNM <- paste0(Mon, '_tavg')
-    kNM <- paste0(Mon, '_k')
-    ch4NM <- paste0(Mon, '_ch4')
-    pco2NM <- paste0(Mon, '_pco2')
-    df_basin_mon<-df_basin[,c('wkbasin','HYBAS_ID','strmOrder','Length',widthNM,dryoutNM,kNM,co2NM,pco2NM)]
+   
     #join prec and temp
-    df_basin_mon<-left_join(df_basin_mon,wkbasins[i,c('wkbasin',precNM,tempNM)],by='wkbasin')
-    colnames(df_basin_mon)[5]<-'Width'
-    colnames(df_basin_mon)[6]<-'timedryout'
-    colnames(df_basin_mon)[7]<-'k'
-    colnames(df_basin_mon)[8]<-'co2'
-    colnames(df_basin_mon)[9]<-'pco2'
-    colnames(df_basin_mon)[10]<-'prec'
-    colnames(df_basin_mon)[11]<-'temp'
-    
-    df_basin_mon<-df_basin_mon%>%dplyr::mutate(
-      isChannel=as.numeric(df_basin_mon$Width>=0.3),
-      surfArea=Length*Width*isChannel/1000000,
-      ephemArea=timedryout*Width*Length*isChannel/1000000
-    )
-    
-    # df_basin_mon[is.na(df_basin_mon$co2E),]%>%View()
+    df_basin_mon <- df_basin %>%
+      dplyr::select(wkbasin, HYBAS_ID, strmOrder, Length, paste0(Mon, 'Width'), paste0(Mon, 'timedryout'),
+                     paste0(Mon, '_k'), paste0(Mon, '_ch4'), paste0(Mon, '_ch4eq')  ) %>% 
+      left_join(wkbasins %>% 
+                 select(wkbasin, paste0(Mon, '_prec'), paste0(Mon, '_tavg')),
+                 by = 'wkbasin') %>% 
+      rename_at(vars(starts_with(Mon)), ~ str_remove(., c(Mon))) %>% 
+      rename_at(vars(everything()),  ~ str_remove(., "\\_") ) %>% 
+      rename(temp=tavg) %>% 
+      dplyr::mutate(
+        isChannel = as.numeric(Width >= 0.3),
+        surfArea = Length * Width * isChannel / 1000000,
+        ephemArea = timedryout * Width * Length * isChannel / 1000000
+      )
+
     ####use ray2013 method to predict ephemeralness
     #1
-    df_basin_mon<-
-      df_basin_mon%>%dplyr::mutate(
-        percInterm_ray13=case_when(strmOrder>4~0,
-                                   strmOrder==4~((-0.005)*prec+0.023*temp+0.27),
-                                   strmOrder==3~((-0.008)*prec+0.028*temp+0.44),
-                                   strmOrder==2~((-0.009)*prec+0.029*temp+0.61),
-                                   strmOrder==1~((-0.009)*prec+0.029*temp+0.77)),
-        timedryout_ray13=case_when(strmOrder>4~0,
-                                   strmOrder==4~((-0.0028)*prec+0.012*temp+0.127),
-                                   strmOrder==3~((-0.0018)*prec+0.011*temp+0.058),
-                                   strmOrder==2~((-0.0021)*prec+0.011*temp+0.088),
-                                   strmOrder==1~((-0.0019)*prec+0.017*temp+0.026)))
+    df_basin_mon <-
+      df_basin_mon %>% dplyr::mutate(
+        percInterm_ray13 = case_when(
+          strmOrder > 4 ~ 0,
+          strmOrder == 4 ~ ((-0.005) * prec + 0.023 * temp + 0.27),
+          strmOrder == 3 ~ ((-0.008) * prec + 0.028 * temp + 0.44),
+          strmOrder == 2 ~ ((-0.009) * prec + 0.029 * temp + 0.61),
+          strmOrder == 1 ~ ((-0.009) * prec + 0.029 * temp + 0.77)),
+        timedryout_ray13 = case_when(
+          strmOrder > 4 ~ 0,
+          strmOrder == 4 ~ ((-0.0028) * prec + 0.012 * temp + 0.127),
+          strmOrder == 3 ~ ((-0.0018) * prec + 0.011 * temp + 0.058),
+          strmOrder == 2 ~ ((-0.0021) * prec + 0.011 * temp + 0.088),
+          strmOrder == 1 ~ ((-0.0019) * prec + 0.017 * temp + 0.026) )
+      )
     #2
-    df_basin_mon<-
-      df_basin_mon%>%dplyr::mutate(
-        percInterm_ray13=case_when(percInterm_ray13>0.9~0.9,
-                                   (percInterm_ray13<=0.9)&(percInterm_ray13>=0)~percInterm_ray13,
-                                   percInterm_ray13<0~0),
-        timedryout_ray13=case_when(timedryout_ray13>0.9~0.9,
-                                   (timedryout_ray13<=0.9)&(timedryout_ray13>=0)~timedryout_ray13,
-                                   timedryout_ray13<0~0),
-        ephemArea_ray13=percInterm_ray13*timedryout_ray13*Width*Length*isChannel/1000000
+    df_basin_mon <-
+      df_basin_mon %>% dplyr::mutate(
+        percInterm_ray13 = case_when(
+          percInterm_ray13 > 0.9 ~ 0.9,
+          percInterm_ray13 <= 0.9 & percInterm_ray13 >= 0 ~ percInterm_ray13,
+          percInterm_ray13 < 0 ~ 0 ),
+        timedryout_ray13 = case_when(
+          timedryout_ray13 > 0.9 ~ 0.9,
+          (timedryout_ray13 <= 0.9) & timedryout_ray13 >= 0 ~ timedryout_ray13,
+          timedryout_ray13 < 0 ~ 0 ),
+        ephemArea_ray13 = percInterm_ray13 * timedryout_ray13 * Width * Length * isChannel / 1000000
       )
     
     #SO summary
-    SOsum<-
-      df_basin_mon%>%group_by(strmOrder)%>%dplyr::summarise(
-        length_km=sum(Length*isChannel/1000), #km
-        width_m=mean(Width*isChannel),
-        area_km2=sum(surfArea),
-        ephemArea_km2=sum(ephemArea),
-        ephemAreaRatio=ephemArea_km2/area_km2,
-        ephemArea_km2_ray13=sum(ephemArea_ray13),
-        ephemAreaRatio_ray13=ephemArea_km2_ray13/area_km2,
-        k=sum(k*(surfArea-ephemArea),na.rm=TRUE)/area_km2,
-        co2=sum(co2*(surfArea-ephemArea),na.rm=TRUE)/area_km2,
-        pco2=sum(pco2*(surfArea-ephemArea),na.rm=TRUE)/area_km2)
+    SOsum <-
+      df_basin_mon %>% group_by(strmOrder) %>% dplyr::summarise(
+        length_km = sum(Length * isChannel / 1000), #km
+        width_m = mean(Width * isChannel),
+        area_km2 = sum(surfArea),
+        ephemArea_km2 = sum(ephemArea),
+        ephemAreaRatio = ephemArea_km2 / area_km2,
+        ephemArea_km2_ray13 = sum(ephemArea_ray13),
+        ephemAreaRatio_ray13 = ephemArea_km2_ray13 / area_km2,
+        k = sum(k * (surfArea - ephemArea), na.rm = TRUE) / area_km2,
+        ch4 = sum(ch4 * (surfArea - ephemArea), na.rm = TRUE) / area_km2,
+        ch4eq = sum(ch4eq * (surfArea - ephemArea), na.rm = TRUE) / area_km2
+      )
     
-    totEphemArea_1<-sum(SOsum$ephemArea_km2)
-    totEphemArea_1_ray13<-sum(SOsum$ephemArea_km2_ray13)
+    totEphemArea_1 <- sum(SOsum$ephemArea_km2)
+    totEphemArea_1_ray13 <- sum(SOsum$ephemArea_km2_ray13)
     
     #extrapolation
     #use width extrapolation to find out endSO
     #predict width for non-captured SO
-    fit<-lm(log(width_m)~strmOrder,data=SOsum[1:wkbasins[i,]$SOabc,])
-    fitsum<-summary(fit)
-    r2_width<-fitsum$r.squared
-    intercept<-round(fit$coefficients[1],5)
-    slope<-round(fit$coefficients[2],5)
-    endSO<-(log(0.3)-intercept)/slope
-    endSOi<-0:ceiling(endSO)
-    SO<-c(endSOi,endSO)
+    fit <- lm(log(width_m) ~ strmOrder, data = SOsum[1:wkbasins[i, ]$SOabc, ])
+    fitsum <- summary(fit)
+    r2_width <- fitsum$r.squared
+    intercept <- round(fit$coefficients[1], 5)
+    slope <- round(fit$coefficients[2], 5)
+    endSO <- (log(0.3) - intercept) / slope
+    endSOi <- 0:ceiling(endSO)
+    SO <- c(endSOi, endSO)
     # SO<-c(endSOi,floor(endSO))
-    width_extrap<-data.frame(strmOrder=SO)
-    width_extrap$width_m<-exp(predict(fit,width_extrap))
+    width_extrap <- data.frame(strmOrder = SO)
+    width_extrap$width_m <- exp(predict(fit, width_extrap))
     
     #predict totLength for non-captured SOs
     #using endSO estimated from width extrapolation and length scaling relationship across SO
-    fit <- lm(log(length_km)~strmOrder,data=SOsum[1:wkbasins[i,]$SOabc,])
-    fitsum<-summary(fit)
-    r2_length<-fitsum$r.squared
-    length_extrap<-data.frame(strmOrder=SO)
-    length_extrap$length_km<-exp(predict(fit,length_extrap))
+    fit <- lm(log(length_km) ~ strmOrder, data = SOsum[1:wkbasins[i, ]$SOabc, ])
+    fitsum <- summary(fit)
+    r2_length <- fitsum$r.squared
+    length_extrap <- data.frame(strmOrder = SO)
+    length_extrap$length_km <- exp(predict(fit, length_extrap))
     
     #extrapolate k
-    fit<-lm(k~strmOrder,data=SOsum[1:wkbasins[i,]$SOabc,])
-    fitsum<-summary(fit)
-    r2_k<-fitsum$r.squared
-    k_extrap<-data.frame(strmOrder=SO)
-    if(fitsum$coefficients[2]>0){k_extrap$k<-mean(SOsum$k,na.rm=TRUE)}else{k_extrap$k<-predict(fit,k_extrap)}
+    fit <- lm(k ~ strmOrder, data = SOsum[1:wkbasins[i, ]$SOabc, ])
+    fitsum <- summary(fit)
+    r2_k <- fitsum$r.squared
+    k_extrap <- data.frame(strmOrder = SO)
+    if (fitsum$coefficients[2] > 0) {
+      k_extrap$k <-
+        mean(SOsum$k, na.rm = TRUE)
+    } else{
+      k_extrap$k <- predict(fit, k_extrap)
+    }
     
     # find the largest non-zero SO for ephemeralness
-    SOabc_e<-wkbasins[i,]$SOabc
-    while((SOsum[SOsum$strmOrder %in% c(SOabc_e),]$ephemAreaRatio==0)){
-      SOabc_e<-SOabc_e-1
-      if(SOabc_e<1){break}}
+    SOabc_e <- wkbasins[i, ]$SOabc
+    while ((SOsum[SOsum$strmOrder %in% c(SOabc_e), ]$ephemAreaRatio == 0)) {
+      SOabc_e <- SOabc_e - 1
+      if (SOabc_e < 1) {
+        break
+      }
+    }
     
-    if(SOabc_e>=2){
-      fit <- lm(ephemAreaRatio~strmOrder,data=SOsum[1:SOabc_e,])
-      fitsum<-summary(fit)
-      r2_ephemArea<-fitsum$r.squared
-      emphemAreaRatio_extrap<-data.frame(strmOrder=SO)
-      emphemAreaRatio_extrap$ephemAreaRatio<-predict(fit,emphemAreaRatio_extrap)
-      totEphemArea_2<-
-        sum(emphemAreaRatio_extrap$ephemAreaRatio*width_extrap$width_m*length_extrap$length_km/1000)
+    if(SOabc_e>=2) {
+      fit <- lm(ephemAreaRatio ~ strmOrder, data = SOsum[1:SOabc_e, ])
+      fitsum <- summary(fit)
+      r2_ephemArea <- fitsum$r.squared
+      emphemAreaRatio_extrap <- data.frame(strmOrder = SO)
+      emphemAreaRatio_extrap$ephemAreaRatio <-
+        predict(fit, emphemAreaRatio_extrap)
+      totEphemArea_2 <-
+        sum(
+          emphemAreaRatio_extrap$ephemAreaRatio * width_extrap$width_m * length_extrap$length_km /
+            1000
+        )
     } else{
-      r2_ephemArea<-NA
-      totEphemArea_2<-NA
-      emphemAreaRatio_extrap<-data.frame(strmOrder=SO)
-      emphemAreaRatio_extrap$ephemAreaRatio<-0}
+      r2_ephemArea <- NA
+      totEphemArea_2 <- NA
+      emphemAreaRatio_extrap <- data.frame(strmOrder = SO)
+      emphemAreaRatio_extrap$ephemAreaRatio <- 0
+    }
     
-    if(SOabc_e>=2){
-      fit <- lm(ephemAreaRatio_ray13~strmOrder,data=SOsum[1:SOabc_e,])
-      fitsum<-summary(fit)
-      r2_ephemArea_ray13<-fitsum$r.squared
-      if(is.na(r2_ephemArea_ray13)){
-        r2_ephemArea_ray13='No Ephem'
-        emphemAreaRatio_ray13_extrap<-data.frame(strmOrder=SO)
-        emphemAreaRatio_ray13_extrap$ephemAreaRatio_ray13<-0
-        totEphemArea_2_ray13=0
+    if(SOabc_e>=2) {
+      fit <- lm(ephemAreaRatio_ray13 ~ strmOrder, data = SOsum[1:SOabc_e, ])
+      fitsum <- summary(fit)
+      r2_ephemArea_ray13 <- fitsum$r.squared
+      if (is.na(r2_ephemArea_ray13)) {
+        r2_ephemArea_ray13 = 'No Ephem'
+        emphemAreaRatio_ray13_extrap <- data.frame(strmOrder = SO)
+        emphemAreaRatio_ray13_extrap$ephemAreaRatio_ray13 <- 0
+        totEphemArea_2_ray13 = 0
       } else{
-        emphemAreaRatio_ray13_extrap<-data.frame(strmOrder=SO)
-        emphemAreaRatio_ray13_extrap$ephemAreaRatio_ray13<-predict(fit,emphemAreaRatio_ray13_extrap)
-        totEphemArea_2_ray13<-
-          sum(emphemAreaRatio_ray13_extrap$ephemAreaRatio_ray13*width_extrap$width_m*length_extrap$length_km/1000)
+        emphemAreaRatio_ray13_extrap <- data.frame(strmOrder = SO)
+        emphemAreaRatio_ray13_extrap$ephemAreaRatio_ray13 <-
+          predict(fit, emphemAreaRatio_ray13_extrap)
+        totEphemArea_2_ray13 <-
+          sum(
+            emphemAreaRatio_ray13_extrap$ephemAreaRatio_ray13 * width_extrap$width_m *
+              length_extrap$length_km / 1000
+          )
       }
     } else{
-      r2_ephemArea_ray13<-NA
-      totEphemArea_2_ray13<-NA}
+      r2_ephemArea_ray13 <- NA
+      totEphemArea_2_ray13 <- NA
+    }
     
     extrap<-cbind(wkbasins[i,]$wkbasin,width_extrap,length_extrap[,2],emphemAreaRatio_extrap[,2],emphemAreaRatio_ray13_extrap[,2],k_extrap[,2])
     names(extrap)<-c('wkbasin','strmOrder','width_m','length_km','ephemAreaRatio','ephemAreaRatio_ray13','k')
-    extrap$wkbasin<-as.character(extrap$wkbasin)
-    extrap['co2']<-SOsum[SOsum$strmOrder==1,'co2']
-    extrap['pco2']<-SOsum[SOsum$strmOrder==1,'pco2']
-    extrap<-extrap%>%mutate(
-      area_km2=width_m*length_km/1000,
-      ephemArea_km2=area_km2*ephemAreaRatio,
-      ephemArea_km2_ray13=area_km2*ephemAreaRatio_ray13
+    extrap$wkbasin <- as.character(extrap$wkbasin)
+    extrap['ch4'] <- SOsum[SOsum$strmOrder == 1, 'ch4']
+    extrap['ch4eq'] <- SOsum[SOsum$strmOrder == 1, 'ch4eq']
+    extrap <- extrap %>% mutate(
+      area_km2 = width_m * length_km / 1000,
+      ephemArea_km2 = area_km2 * ephemAreaRatio,
+      ephemArea_km2_ray13 = area_km2 * ephemAreaRatio_ray13
     )
     #correct for negative effective area
-    extrap[extrap$ephemArea_km2>extrap$area_km2,]$ephemArea_km2<-extrap[extrap$ephemArea_km2>extrap$area_km2,]$area_km2
-    extrap[extrap$ephemArea_km2_ray13>extrap$area_km2,]$ephemArea_km2_ray13<-extrap[extrap$ephemArea_km2_ray13>extrap$area_km2,]$area_km2
-    extrap<-extrap%>%dplyr::mutate(
-      effecArea_km2=area_km2-ephemArea_km2,
-      co2F=co2*k*12*0.365,#gC/m2/yr
-      co2E=co2*k*effecArea_km2*365*12/1000000#GgC/yr
-    )
+    extrap[extrap$ephemArea_km2 > extrap$area_km2, ]$ephemArea_km2 <- extrap[extrap$ephemArea_km2 > extrap$area_km2, ]$area_km2
+    extrap[extrap$ephemArea_km2_ray13 > extrap$area_km2, ]$ephemArea_km2_ray13 <- extrap[extrap$ephemArea_km2_ray13 > extrap$area_km2, ]$area_km2
     
-    totLength_2<-sum(extrap$length_km) #total extrapolated flowline length
-    totArea_2<-sum(extrap$area_km2)# total extrapolated surface area
-    totEphemArea_2<-sum(extrap$ephemArea_km2)
-    totEffectArea_2<-sum(extrap$effecArea_km2)
-    totEphemArea_2_ray13<-sum(extrap$ephemArea_km2_ray13)
-    if(sum(extrap$effecArea_km2!=0)){k_2<-sum(extrap$k*extrap$effecArea_km2)/sum(extrap$effecArea_km2)}else{k_2=0}
-    co2_2<-mean(extrap$co2)
-    pco2_2<-mean(extrap$pco2)
-    co2F_2<-if(sum(extrap$effecArea_km2!=0)){sum(extrap$co2F*extrap$effecArea_km2)/totEffectArea_2}else{co2F_2=0}
-    co2E_2<-sum(extrap$co2E)
+    extrap <- extrap %>% 
+      dplyr::mutate( effecArea_km2 = area_km2 - ephemArea_km2,
+                     ch4F = (ch4-ch4eq) * k * 12 * 0.365, #gC/m2/yr
+                     ch4E = (ch4-ch4eq) * k * effecArea_km2 * 365 * 12 / 1000000#GgC/yr
+                    )
+    
+    
+    totLength_2 <- sum(extrap$length_km) #total extrapolated flowline length
+    totArea_2 <- sum(extrap$area_km2)# total extrapolated surface area
+    totEphemArea_2 <- sum(extrap$ephemArea_km2)
+    totEffectArea_2 <- sum(extrap$effecArea_km2)
+    totEphemArea_2_ray13 <- sum(extrap$ephemArea_km2_ray13)
+    if (sum(extrap$effecArea_km2 != 0)) {
+      k_2 <-
+        sum(extrap$k * extrap$effecArea_km2) / sum(extrap$effecArea_km2)
+    } else{
+      k_2 = 0
+    }
+    ch4_2 <- mean(extrap$ch4)
+    ch4_eq_2 <- mean(extrap$ch4_eq)
+    co2F_2 <-
+      if (sum(extrap$effecArea_km2 != 0)) {
+        sum(extrap$co2F * extrap$effecArea_km2) / totEffectArea_2
+      } else{
+        co2F_2 = 0
+      }
+    ch4E_2 <- sum(extrap$ch4E)
     
     basinMonArea<-data.frame(basinCode=wkbasins[i,]$wkbasin,Mon,
                              endSO,r2_width,r2_length,r2_ephemArea,r2_ephemArea_ray13,r2_k,totEphemArea_1,
                              totEphemArea_1_ray13,
                              totLength_2,totArea_2,totEphemArea_2,totEphemArea_2_ray13,totEffectArea_2,
-                             k_2,co2_2,pco2_2,co2F_2,co2E_2)
+                             k_2,ch4_2,ch4_eq_2,co2F_2,co2E_2)
     
     #combining results
     if(i==1 & Mon=='Jan'){basinArea<-basinMonArea} else {basinArea<-rbind(basinArea,basinMonArea)}
@@ -521,14 +564,17 @@ rm(basinMonArea, df_basin,df_basin_mon,emphemAreaRatio_extrap,emphemAreaRatio_ra
 
 
 ####replacing yeaWidth with GRWL width where available####
-GRWLwidth<-read_csv('data/raw/gis/upscaling_vars/GRWLwidthHydroBASIN4_30mplus.csv')
-GRWLwidth<-GRWLwidth[,c('COMID','width_mean')]
-GRWLwidth<-GRWLwidth%>%group_by(COMID)%>%dplyr::summarise(width_mean=min(width_mean))
-GRWLwidth<-GRWLwidth[GRWLwidth$width_mean>=90,]
-nrow(GRWLwidth)/nrow(df) #8.5%,4.3%
+GRWLwidth <-
+  read_csv('data/raw/gis/upscaling_vars/GRWLwidthHydroBASIN4_30mplus.csv')
+GRWLwidth <- GRWLwidth[, c('COMID', 'width_mean')]
+GRWLwidth <- GRWLwidth %>% 
+  group_by(COMID) %>% 
+  dplyr::summarise(width_mean = min(width_mean))
+GRWLwidth <- GRWLwidth[GRWLwidth$width_mean >= 90, ]
+nrow(GRWLwidth) / nrow(df) #8.5%,4.3%
 
-df_1<-df[!df$COMID%in%GRWLwidth$COMID,]
-df_2<-df[df$COMID%in%GRWLwidth$COMID,]
+df_1 <- df[!df$COMID %in% GRWLwidth$COMID, ]
+df_2 <- df[df$COMID %in% GRWLwidth$COMID, ]
 rm(df)
 gc()
 

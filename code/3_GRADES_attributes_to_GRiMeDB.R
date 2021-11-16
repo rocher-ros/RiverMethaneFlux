@@ -68,16 +68,26 @@ annPP <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "a
 
 colnames(annPP) <- c("COMID", "GPP_yr",   "NPP_yr")
 
+annPP %>% 
+  summarise(across(everything(), ~sum(is.na(.x))))
+
 eleSlope <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "eleSlope", full.names = TRUE), read_csv) %>% 
   bind_rows()
 
 colnames(eleSlope) 
+
+eleSlope %>% 
+  summarise(across(everything(), ~sum(is.na(.x))))
 
 gwTable <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "gwTable", full.names = TRUE), read_csv) %>% 
   bind_rows() %>% 
   mutate(across(starts_with("gw"), abs))
 
 colnames(gwTable)
+
+
+gwTable %>% 
+  summarise(across(everything(), ~sum(is.na(.x))))
 
 k <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "k", full.names = TRUE), read_csv) %>% 
   bind_rows()
@@ -129,18 +139,24 @@ wetland <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = 
 
 colnames(wetland)
 
-land <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "landcover", full.names = TRUE), read_csv) %>% 
-  bind_rows() %>% 
-  dplyr::rename(wetland_cover=wetland)
+land <- read_csv("data/raw/gis/GRADES_attributes/land_good.csv") %>%
+  mutate(trees=ifelse(is.na(trees) == TRUE, 0, trees)) %>% 
+  dplyr::select(-Length, -slope, -uparea)
 
 colnames(land)
 
-nutrients_water <- read_csv("data/raw/gis/GRADES_attributes/nutrients_water.csv")
+nutrients_water <- read_csv("data/raw/gis/GRADES_attributes/nutrients_water.csv") %>% 
+  dplyr::select(-P_retention_subgrid)
 colnames(nutrients_water)
 
 #read coordinates from grades
 grades_latlon <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
   dplyr::select(COMID, lat, lon)
+
+nutrients_water %>% 
+  summarise(across(everything(), ~sum(is.na(.x)))) %>% 
+  pivot_longer(everything(), names_to = "name", values_to = "n_na") %>% 
+  arrange(desc(n_na))
 
 ## Now get GRiMeDB ----
 load(file.path("data", "raw", "MethDB_tables_converted.rda"))
@@ -176,7 +192,7 @@ grades_gw_sf <- grades_latlon %>%
 
 #get the sites with gaps and no gaps in separate df
 gw_withdata <-  grades_gw_sf %>% 
-  drop_na(gw_jan) %>% 
+  drop_na(gw_jan:gw_dec) %>% 
   st_sf()
 
 gw_missing <- grades_gw_sf %>%
@@ -197,8 +213,8 @@ gw_good <- bind_rows(gw_withdata %>% st_drop_geometry(),
 rm( grades_gw_sf, gw_withdata, gw_filled)
 
 #join all GRADES tables into one, and export it as one
-grades_attributes <-  grades_latlon %>% 
-  left_join(annPP, by="COMID") %>%  
+grades_attributes <-  annPP %>% 
+  left_join(grades_latlon, by="COMID") %>%  
   left_join(eleSlope, by="COMID") %>% 
   left_join(gw_good, by="COMID") %>% 
   left_join(k, by="COMID") %>% 
@@ -212,9 +228,19 @@ grades_attributes <-  grades_latlon %>%
   left_join(wetland, by ="COMID") %>% 
   left_join(land, by ="COMID") %>% 
   left_join(nutrients_water, by ="COMID") %>% 
-  mutate(across(where(is.numeric), ~na_if(., -Inf))) %>% 
-  mutate(across(where(is.numeric), ~na_if(., Inf))) %>% 
-  drop_na(elev)
+  mutate(across(everything(), ~na_if(., -Inf))) %>% 
+  mutate(across(everything(), ~na_if(., Inf))) %>% 
+  drop_na(elev) 
+
+grades_attributes %>% 
+  summarise(across(everything(), ~sum(is.na(.x)))) %>% 
+  pivot_longer(everything(), names_to = "name", values_to = "n_na") %>% 
+  arrange(desc(n_na)) %>% print(n=200)
+
+grades_attributes %>%
+  filter(duplicated(.[["COMID"]]))
+         
+
 
 rm(annPP, eleSlope, gwTable, k, land, monPP, monTemp, popdens, prectemp, soilATT, sresp, 
    uparea, wetland, gw_good)
