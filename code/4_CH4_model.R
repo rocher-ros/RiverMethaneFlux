@@ -70,7 +70,7 @@ vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 
 
 # Select useful variables for the model, some variables were removed due to a high correlation with other ones 
 variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",
-                         'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY', 
+                         'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY', "lon", "lat",
                          'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY",
                          "N_aquaculture", "N_gnpp", "N_load", "N_point",  "N_surface_runoff_agri", "N_surface_runoff_nat" )
 
@@ -224,7 +224,7 @@ set.seed(345)
 tune_res <- tune_grid(
   tune_wf,
   resamples = trees_folds,
-  grid = 10
+  grid = 20
 )
 
 tune_res
@@ -298,11 +298,11 @@ n.cores= parallel::detectCores()-1
 
 rf_mod <-
   rand_forest(
-    mtry = 20,
+    mtry = 10,
     trees = 1000,
-    min_n = 15 ) %>%
+    min_n = 21 ) %>%
   set_mode("regression") %>%
-  set_engine("ranger", importance="permutation", num.threads =n.cores)
+  set_engine("ranger", importance="impurity", num.threads =n.cores, quantreg = TRUE)
 
 #prepare a workflow with it to feed into the function
 wf <-
@@ -312,11 +312,11 @@ wf <-
 
 ## big function of model fitting and predicting
 predict_RF_grime <- function(df) {
-  split <- initial_split(df )
+  split <- initial_split(df)
   train_df <- training(split)
   test_df <- testing(split)
   
-  folds <- vfold_cv(train_df, v = 10)
+  #folds <- vfold_cv(train_df, v = 10)
   
   #create recipe
   recipe_train <- train_df %>% 
@@ -329,12 +329,24 @@ predict_RF_grime <- function(df) {
     add_recipe(recipe_train) %>%
     fit(data = train_df) 
   
-  
-  
   #predict on test data
- preds <- predict(fit_wf[1,], test_df) %>% 
+# preds <- predict(fit_wf, test_df) %>% 
+#   bind_cols(test_df)
+
+ # get quantile regression intervals as 
+ # https://www.bryanshalloway.com/2021/04/21/quantile-regression-forests-for-prediction-intervals/ 
+  #https://www.jmlr.org/papers/volume7/meinshausen06a/meinshausen06a.pdf
+ preds <- predict(
+   fit_wf$fit$fit$fit, 
+   workflows::extract_recipe(fit_wf) %>% bake(test_df),
+   type = "quantiles",
+   quantiles = c(.05, .95, 0.50) ) %>% 
+   with(predictions) %>% 
+   as_tibble() %>% 
+   set_names(paste0(".pred", c("_lower", "_upper", ""))) %>% 
    bind_cols(test_df)
  
+
 
 return(list(preds, fit_wf, train_df))
 
@@ -392,7 +404,7 @@ yearly_preds <- yearly_model[1] %>% as.data.frame()
 yearly_model[[2]] %>%
   extract_fit_parsnip() %>% 
   vi() %>% 
-  filter(Importance >.13) %>% 
+  filter(Importance >300) %>% 
   ggplot( aes(x=Importance, 
            y= reorder(Variable, Importance, FUN = stats::median)))+
   geom_col( color = "gray80", fill="red4")+
@@ -445,8 +457,7 @@ drive_download( file="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attribut
                 path="data/processed/grade_attributes.csv",
              overwrite = TRUE)
 
-global_preds <- read_csv( "data/processed/grade_attributes.csv") %>% 
-  dplyr::select(-slope)
+global_preds <- read_csv( "data/processed/grade_attributes.csv") 
 
 
 vars_to_log_glob <-  global_preds %>% 
@@ -460,22 +471,24 @@ vars_to_log_glob <-  global_preds %>%
 vars_to_remove <-  global_preds %>% 
   select(contains(c('GPP_yr', 'S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",
                      'npp_', 'forest',  'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
-                     'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY",
+                     'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY", 
                     "N_aquaculture", "N_gnpp", "N_load", "N_point", "N_surface_runoff_agri", "N_surface_runoff_nat"),
-                  ignore.case = FALSE)) %>%
+                  ignore.case = FALSE), lat, lon) %>%
   colnames(.)
 
 
 
 #do same transformations to the global dataset
 global_preds_trans <- global_preds %>%
+  select(-all_of(vars_to_remove)) %>% 
   mutate(across(.cols=all_of(vars_to_log_glob), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
   rename_with( ~str_c("Log_", all_of(vars_to_log_glob)), .cols = all_of(vars_to_log_glob) )  %>% #rename the log transformed variables 
   drop_na()
 
 colnames(global_preds_trans)
 
-rm(global_preds)
+rm(global_preds, grimeDB_attributes, grimeDB_attr_trans)
+gc()
 
 predict_methane <- function(all_models, month, global_predictors) {
   all_months <- tolower(month.abb)
@@ -484,13 +497,14 @@ predict_methane <- function(all_models, month, global_predictors) {
   
   model_month <- all_models$model_fit[[month]]
 
-  df_predictors <- global_predictors %>%
-    select(-ends_with(setdiff(all_months, month_selected))) %>%
-    rename_all(~ str_replace(., month_selected, "month"))
+   df_predictors <- global_predictors %>%
+     select(-ends_with(setdiff(all_months, month_selected))) %>%
+     rename_all(~ str_replace(., month_selected, "month"))
+   
+   out <- predict(model_month, df_predictors)
+
   
-  out <- predict(model_month, df_predictors)
-  
-  colnames(out) <- paste( month.abb[month], "ch4", sep="_")
+  colnames(out) <- paste( month.abb[month],  "ch4_mid", sep="_")
   out
 }
 
@@ -521,124 +535,43 @@ drive_upload(media = "data/processed/meth_predictions.csv",
              overwrite = TRUE)
 
 
+#predict methane with Pred intervals
 
-######
+predict_methane_interval <- function(all_models, month, global_predictors) {
+  all_months <- tolower(month.abb)
+  
+  month_selected <- all_months[month]
+  
+  model_month <- all_models$model_fit[[month]]
+  
+  # df_predictors <- global_predictors %>%
+  #   select(-ends_with(setdiff(all_months, month_selected))) %>%
+  #   rename_all(~ str_replace(., month_selected, "month"))
 
-recipe_rf <- function(dataset) {
+  out <-  predict(
+    model_month$fit$fit$fit, 
+    workflows::extract_recipe(model_month) %>% 
+      bake(global_predictors %>%
+             select(-ends_with(setdiff(all_months, month_selected))) %>%
+             rename_all(~ str_replace(., month_selected, "month"))),
+    type = "quantiles",
+    quantiles = c(.1, .9, 0.5) ) %>% 
+    with(predictions) %>% 
+    as_tibble() 
   
-  recipe(Log_CH4mean ~. , data = dataset) %>% 
-    step_normalize(all_predictors(), -all_outcomes()) %>%
-    prep(data = dataset)
-  
+  colnames(out) <- paste( month.abb[month], c( "ch4_lower", "ch4_upper", "ch4_mid"), sep="_")
+  out
 }
 
-
-rf_fun <- function(split, id) {
-  
-  analysis_set <- split %>% 
-    analysis()
-  
-  analysis_prepped <- analysis_set %>% 
-    recipe_rf()
-  analysis_baked <- analysis_prepped %>% 
-    bake(new_data = analysis_set)
-  
-  model_rf <- rand_forest(
-      mtry = 20,
-      trees = 1000,
-      min_n = 15 ) %>%
-    set_mode("regression") %>%
-    set_engine("ranger", importance="permutation", num.threads =n.cores) %>% 
-    fit(Log_CH4mean ~., data=analysis_baked )
-  
-  assessment_set <- split %>% assessment()
-  assessment_prepped <- assessment_set %>% recipe_rf()
-  assessment_baked <- assessment_prepped %>% 
-    bake(new_data = assessment_set)
-  
-  tibble(
-    "id" = id,
-    "truth" = assessment_baked$Log_CH4mean,
-    "prediction" = model_rf %>%
-      predict(new_data = assessment_baked) %>%
-      unlist()
-  )
-  
-}
-
-folds <- vfold_cv(train_df, v = 5)
-
-pred_rf <- map2_df(
-  .x = folds$splits,
-  .y = folds$id,
-  ~ rf_fun(split = .x, id = .y)
-)
-
-
-ggplot(pred_rf, aes(truth, prediction, color=id))+
-  geom_point()+
-  geom_abline(slope=1, intercept = 0)+
-  stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9) #put R2 and label
-
-
-##### stacking? 
-library(stacks)
-#setup of the RF model
-
-n.cores= parallel::detectCores()-1
-
-rf_mod <-
-  rand_forest(
-    mtry = 20,
-    trees = 1000,
-    min_n = 15 ) %>%
-  set_mode("regression") %>%
-  set_engine("ranger", importance="permutation", num.threads =n.cores)
-
-
-# split into training and testing sets
-set.seed(1)
-
-df <- data_for_model
-split <- initial_split(df )
-train_df <- training(split)
-test_df <- testing(split)
-
-# use a 5-fold cross-validation
-set.seed(1)
-folds <- rsample::vfold_cv(train_df, v = 5)
-
-
-rec <- recipe(Log_CH4mean ~. , data = train_df) %>% 
-  step_normalize(all_predictors(), -all_outcomes()) %>%
-  prep(data = dataset)
-
-#prepare a workflow with it to feed into the function
-wf <-
-  workflow() %>%
-  add_recipe(rec) %>% 
-  add_model(rf_mod)
-
-metric <- metric_set(rmse)
-
-ctrl_grid <- control_stack_grid()
-ctrl_res <- control_stack_resamples()
-
-# fit to the 5-fold cv
-set.seed(1)
-
-rf_reg_res <- 
-  fit_resamples(
-    wf,
-    resamples = folds,
-    metrics = metric,
-    control = ctrl_res
-  )
-
-model_st <-
-  stacks() %>%
-  add_candidates(rf_reg_res) %>% 
-  add_candidates(rf_reg_res) 
-
-model_st <- model_st%>%
-  blend_predictions()
+ch4_jan <- predict_methane_interval(monthly_models, 1, global_preds_trans)
+ch4_feb <- predict_methane_interval(monthly_models, 2, global_preds_trans)
+ch4_mar <- predict_methane_interval(monthly_models, 3, global_preds_trans)
+ch4_apr <- predict_methane_interval(monthly_models, 4, global_preds_trans)
+ch4_may <- predict_methane_interval(monthly_models, 5, global_preds_trans)
+ch4_jun <- predict_methane_interval(monthly_models, 6, global_preds_trans)
+ch4_jul <- predict_methane_interval(monthly_models, 7, global_preds_trans)
+ch4_aug <- predict_methane_interval(monthly_models, 8, global_preds_trans)
+ch4_sep <- predict_methane_interval(monthly_models, 9, global_preds_trans)
+ch4_oct <- predict_methane_interval(monthly_models, 10, global_preds_trans)
+ch4_nov <- predict_methane_interval(monthly_models, 11, global_preds_trans)
+ch4_dec <- predict_methane_interval(monthly_models, 12, global_preds_trans)
