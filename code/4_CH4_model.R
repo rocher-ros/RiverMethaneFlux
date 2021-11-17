@@ -535,7 +535,8 @@ drive_upload(media = "data/processed/meth_predictions.csv",
              overwrite = TRUE)
 
 
-#predict methane with Pred intervals
+#predict methane with quantile intervals ----
+#takes a lot of computational power and memory, so I need to split it in half each month
 
 predict_methane_interval <- function(all_models, month, global_predictors) {
   all_months <- tolower(month.abb)
@@ -544,10 +545,6 @@ predict_methane_interval <- function(all_models, month, global_predictors) {
   
   model_month <- all_models$model_fit[[month]]
   
-  # df_predictors <- global_predictors %>%
-  #   select(-ends_with(setdiff(all_months, month_selected))) %>%
-  #   rename_all(~ str_replace(., month_selected, "month"))
-
   out <-  predict(
     model_month$fit$fit$fit, 
     workflows::extract_recipe(model_month) %>% 
@@ -563,15 +560,16 @@ predict_methane_interval <- function(all_models, month, global_predictors) {
   out
 }
 
-ch4_jan <- predict_methane_interval(monthly_models, 1, global_preds_trans)
-ch4_feb <- predict_methane_interval(monthly_models, 2, global_preds_trans)
-ch4_mar <- predict_methane_interval(monthly_models, 3, global_preds_trans)
-ch4_apr <- predict_methane_interval(monthly_models, 4, global_preds_trans)
-ch4_may <- predict_methane_interval(monthly_models, 5, global_preds_trans)
-ch4_jun <- predict_methane_interval(monthly_models, 6, global_preds_trans)
-ch4_jul <- predict_methane_interval(monthly_models, 7, global_preds_trans)
-ch4_aug <- predict_methane_interval(monthly_models, 8, global_preds_trans)
-ch4_sep <- predict_methane_interval(monthly_models, 9, global_preds_trans)
-ch4_oct <- predict_methane_interval(monthly_models, 10, global_preds_trans)
-ch4_nov <- predict_methane_interval(monthly_models, 11, global_preds_trans)
-ch4_dec <- predict_methane_interval(monthly_models, 12, global_preds_trans)
+for(i in 1:12){
+  
+  ch4_1 <- predict_methane_interval(monthly_models, i, global_preds_trans[1:1500000,])
+  gc()
+  ch4_2 <- predict_methane_interval(monthly_models, i, global_preds_trans[1500001:2898499,])
+  
+  bind_cols(ch4_1, ch4_2) %>% 
+    mutate(across(ends_with("ch4"), ~exp(.x)-.1)) %>% 
+    write_csv(paste0("data/raw/meth_preds_quantiles/meth_pred_",tolower(month.abb)[i],".csv"))
+  rm(ch4_1, ch4_2)
+  gc() 
+  
+}
