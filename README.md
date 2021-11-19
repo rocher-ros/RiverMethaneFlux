@@ -30,7 +30,12 @@ The random forest model seems to do OK, with an average $R^{2}= 0.5$. Next figur
 
 ![](figures/model_perf_monthly.png)
 
-The most important variable by far is the depth to groundwater table, followed by P runoff and elevation.
+One problem I find is that monthly models are often very different among them, given that the number of sites changes a lot as well as the spatial coverage. Thus it not only captures seasonal changes but also the geographical coverage of the data. One solution to maintain spatial coherence as well as the seasonality is for each month, feed the data of the given month and the adjacent months (e.g. for march use the data form february, march and april). This makes the model more homogeneous and robust, as well as subtantial increase in predictive power. 
+
+![](figures/model_perf_monthly_adjacent.png)
+
+We can also look at the importance of the model variables.
+
 
 ![](figures/VIP_scores_mean.png)
 
