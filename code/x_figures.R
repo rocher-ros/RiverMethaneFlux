@@ -19,10 +19,10 @@ lapply(package_list, require, character.only = TRUE)
 # 1. Load files ----
 
 #upscaled methane concentrations
-meth_concs <- read_csv("data/processed/meth_predictions.csv")
+meth_concs <- read_csv("output/grades_ch4_k_q.csv", lazy = FALSE)
 
 #read coordinates from grades
-grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_lat_lon.csv")
+grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv", lazy = FALSE)
 
 
 #turn it an sf object
@@ -36,9 +36,9 @@ rm(grades, meth_concs)
 
 #calculate average methane for each site
 meth_avg <- meth_gis %>% 
-  drop_na(ch4_jan:ch4_dec) %>% 
-  mutate( ch4_mean = rowMeans(select(., ch4_jan:ch4_dec), na.rm = TRUE)) %>% 
-  select(COMID, ch4_mean, geometry) %>% 
+  rowwise() %>% 
+  mutate( ch4_mean = mean(Jan_ch4:Dec_ch4)) %>% 
+  select(COMID, ch4_mean, runoff, runoffFL, geometry) %>% 
   st_sf()
 
 
@@ -68,44 +68,58 @@ meth_hexes <- st_join(meth_avg, grid, join = st_intersects)
 
 meth_hexes_avg <- meth_hexes %>% 
   group_by(index) %>%
-  summarise(methane = mean(ch4_mean, na.rm = TRUE)#,
-            #temp= mean(temp_yr, na.rm = TRUE)
-            ) %>% 
+  summarise(methane = mean(ch4_mean, na.rm = TRUE),
+            runoff= mean(runoff, na.rm = TRUE) ) %>%
+  st_sf()  
+
+buffers <- meth_hexes_avg %>% 
+  st_drop_geometry() %>%
+  right_join(grid, by="index") %>%
   mutate(buffer_change = case_when(
-    temp < 0 ~ -100,
-    temp >=0 & temp < 20~ -6000,
-    temp >= 20 ~ -12000)) %>% 
-  drop_na(temp) %>%
-  st_sf() %>% 
-  st_buffer( dist= meth_hexes_avg$buffer_change)
+    runoff < 25 ~ -30000,
+    runoff >= 25 & runoff < 50 ~ -20000,
+    runoff >=50 & runoff < 100 ~ -15000,
+    runoff >=100 & runoff < 200 ~ -10000,
+    runoff >= 200 & runoff < 400 ~ -5000,
+    runoff >= 400 & runoff < 700 ~ -2000,
+    runoff >= 700 & runoff < 1000 ~ -1000,
+    runoff >= 1000  ~ 0,
+    is.na(methane) == TRUE ~ 0))
+ 
 
 
 meth_hexes_avg2 <- meth_hexes_avg %>%
   st_drop_geometry() %>%
-  right_join(grid, by="index") %>% 
-  st_sf()
+  right_join(grid, by="index") %>%
+  st_sf() %>% 
+  st_buffer( dist=  buffers$buffer_change)
 
 ggplot() +
   geom_sf(
     data = meth_hexes_avg2, color = NA,
     aes( fill = methane) )+
-  geom_sf(data=lakes, fill="white", color="white")+
+  geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
-    trans = "log10", 
+    #trans = "log10", 
     name = "Methane concentration (umol/L)")+
   guides( fill = guide_colourbar(title.position = "top"))+
-  theme_map()+
-  theme(legend.position = c(0.4, 0.05),
+  theme_void()+
+  theme(legend.position = c(0.55, 0.15),
         legend.direction = "horizontal")
 
-ggsave(filename = "figures/map_ch4.png", dpi=500, height = 10, width = 16)
-
-tmap(land)
-land <- land %>% st_as_sf()
+ggsave(filename = "figures/map_ch4.png", dpi=600, height = 10, width = 16)
 
 
+ch4E_hybas <- read_csv("output/ch4E_hybas.csv")
 
-tmap_mode("plot")
-tm_shape(land)+
-  tm_raster("trees", palette = terrain.colors(10))
+ch4E_hybas %>% 
+  summarise(across(ch4E_Jan:ch4E_Dec, sum)) %>% 
+  pivot_longer( everything(), names_to = "month", values_to = "flux") %>% 
+  mutate(per_day=flux/12) %>% 
+  summarise(sum=sum(per_day))
+  
+
+
+min(ch4E_hybas$ch4_Apr)
+

@@ -299,7 +299,7 @@ n.cores= parallel::detectCores()-1
 rf_mod <-
   rand_forest(
     mtry = 10,
-    trees = 1000,
+    trees = 1200,
     min_n = 21 ) %>%
   set_mode("regression") %>%
   set_engine("ranger", importance="impurity", num.threads =n.cores, quantreg = TRUE)
@@ -312,6 +312,9 @@ wf <-
 
 ## big function of model fitting and predicting
 predict_RF_grime <- function(df) {
+  
+  df <- df %>% dplyr::select(-month)
+  
   split <- initial_split(df)
   train_df <- training(split)
   test_df <- testing(split)
@@ -357,25 +360,47 @@ return(list(preds, fit_wf, train_df))
 #prepare a dataset, nesting by month
 data_model_nested <- grimeDB_attr_trans %>% 
   select(-all_of(variables_to_remove)) %>% 
-  drop_na() %>% 
-  group_by(month) %>% 
-  nest() %>% 
-  arrange(month)
+  drop_na()# %>% 
+  #group_by(month) %>% 
+  #nest() %>% 
+  #arrange(month)
 
 set.seed(123)
 
 #Run the model for each month in a map
-monthly_models <- data_model_nested %>%
-  mutate(month_label = tolower(month.abb[month]),
-         model_out = map(data, possibly(predict_RF_grime, otherwise = NA))) %>% 
+# monthly_models <- data_model_nested %>%
+#   mutate(month_label = tolower(month.abb[month]),
+#          model_out = map(data, possibly(predict_RF_grime, otherwise = NA))) %>% 
+#   rowwise() %>%
+#   mutate( preds = model_out[1],
+#     model_fit = model_out[2]) %>% 
+#   select(-data, -model_out)
+
+#Feed the adjacent months for each month, adapted from
+# https://community.rstudio.com/t/many-models-with-overlapping-groups/1629/4
+monthly_models <- lst(
+  jan = . %>% filter(month %in% c(12,1,2)),
+  feb = . %>% filter(month %in% 1:3),
+  mar = . %>% filter(month %in% 2:4),
+  apr = . %>% filter(month %in% 3:5),
+  may = . %>% filter(month %in% 4:6),
+  jun = . %>% filter(month %in% 5:7),
+  jul = . %>% filter(month %in% 6:8),
+  aug = . %>% filter(month %in% 7:9),
+  sep = . %>% filter(month %in% 8:10),
+  oct = . %>% filter(month %in% 9:11),
+  nov = . %>% filter(month %in% 10:12),
+  dec = . %>% filter(month %in% c(11,12,1))) %>% 
+  map_dfr(~ tidyr::nest(.x(data_model_nested )), .id = "month_label") %>% 
+  mutate( model_out = map(data, possibly(predict_RF_grime, otherwise = NA))) %>% 
   rowwise() %>%
   mutate( preds = model_out[1],
-    model_fit = model_out[2]) %>% 
+          model_fit = model_out[2]) %>% 
   select(-data, -model_out)
-
 
 #plot them  
 monthly_models %>% 
+  mutate(month_label= fct_relevel(month_label, levels = tolower(month.abb))) %>% 
   unnest(preds) %>% 
 ggplot( aes(.pred, Log_CH4mean))+
   geom_point(alpha=.6)+
@@ -383,9 +408,9 @@ ggplot( aes(.pred, Log_CH4mean))+
   stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
   labs(x="CH4 predictions", y="CH4 observations", title="one model for each month")+
   theme_bw()+
-  facet_wrap(~month)
+  facet_wrap(~month_label)
 
-ggsave(filename= "figures/model_perf_monthly.png", width = 12, height = 8)
+ggsave(filename= "figures/model_perf_monthly_adjacent.png", width = 12, height = 8)
 
 
 ## run the data on the whole dataset, not nesting by month ----
@@ -457,7 +482,7 @@ drive_download( file="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attribut
                 path="data/processed/grade_attributes.csv",
              overwrite = TRUE)
 
-global_preds <- read_csv( "data/processed/grade_attributes.csv") 
+global_preds <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE) 
 
 
 vars_to_log_glob <-  global_preds %>% 
@@ -501,10 +526,13 @@ predict_methane <- function(all_models, month, global_predictors) {
      select(-ends_with(setdiff(all_months, month_selected))) %>%
      rename_all(~ str_replace(., month_selected, "month"))
    
-   out <- predict(model_month, df_predictors)
+   df_baked <- workflows::extract_recipe(model_month) %>% 
+     bake(df_predictors) 
+   
+   out <- predict(model_month, df_baked)
 
   
-  colnames(out) <- paste( month.abb[month],  "ch4_mid", sep="_")
+  colnames(out) <- paste( month.abb[month],  "ch4", sep="_")
   out
 }
 
@@ -526,6 +554,14 @@ dat_out <- global_preds_trans %>% select(COMID) %>%
   bind_cols(ch4_jan, ch4_feb, ch4_mar, ch4_apr, ch4_may, ch4_jun,
             ch4_jul, ch4_aug, ch4_sep, ch4_oct, ch4_nov, ch4_dec) %>% 
   mutate(across(ends_with("ch4"), ~exp(.x)-.1))
+
+dat_out %>% summarise(across(everything(), mean))
+
+dat_out %>% 
+  pivot_longer(-COMID, values_to = "ch4", names_to = "month") %>% 
+ggplot()+
+  geom_density(aes(ch4))+
+  facet_wrap(~month)
 
 
 write_csv(dat_out, "data/processed/meth_predictions.csv")
