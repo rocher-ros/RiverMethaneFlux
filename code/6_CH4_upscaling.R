@@ -43,12 +43,7 @@ timedryout_calculater <- function(Q) {
 
 # 1. Load files ----
 
-#read coordinates from grades
-grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
-  select(COMID, lon, lat)
-
 hydro_k <- read_csv("data/processed/q_and_k.csv")
-
 
 #upscaled methane concentrations
 meth_concs <- read_csv("data/processed/meth_predictions.csv") 
@@ -897,7 +892,10 @@ for (Mon in month.abb) {
 gc()
 
 write_csv(hydroBAS, 'output/ch4E_hybas.csv')
-write_csv(df, "output/grades_ch4_k_q.csv")
+
+df %>% 
+  dplyr::select(-ends_with(c("Ta", "dryout"))) %>% 
+  write_csv( "output/grades_ch4_k_q.csv")
 
 
 

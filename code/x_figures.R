@@ -22,23 +22,40 @@ lapply(package_list, require, character.only = TRUE)
 meth_concs <- read_csv("output/grades_ch4_k_q.csv", lazy = FALSE)
 
 #read coordinates from grades
-grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv", lazy = FALSE)
+grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv", lazy = FALSE) %>% 
+  dplyr::select(-Length, -slope)
 
 
 #turn it an sf object
 meth_gis <- left_join(meth_concs, grades, by = "COMID") %>% 
+  mutate(Jan_fch4 = (Jan_ch4 - Jan_ch4eq)*Jan_k,
+         Feb_fch4 = (Feb_ch4 - Feb_ch4eq)*Feb_k,
+         Mar_fch4 = (Mar_ch4 - Mar_ch4eq)*Mar_k,
+         Apr_fch4 = (Apr_ch4 - Apr_ch4eq)*Apr_k,
+         May_fch4 = (May_ch4 - May_ch4eq)*May_k,
+         Jun_fch4 = (Jun_ch4 - Jun_ch4eq)*Jun_k,
+         Jul_fch4 = (Jul_ch4 - Jul_ch4eq)*Jul_k,
+         Aug_fch4 = (Aug_ch4 - Aug_ch4eq)*Aug_k,
+         Sep_fch4 = (Sep_ch4 - Sep_ch4eq)*Sep_k,
+         Oct_fch4 = (Oct_ch4 - Oct_ch4eq)*Oct_k,
+         Nov_fch4 = (Nov_ch4 - Nov_ch4eq)*Nov_k,
+         Dec_fch4 = (Dec_ch4 - Dec_ch4eq)*Dec_k
+         ) %>%
   st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
   st_transform("+proj=eqearth +wktext") 
 
 rm(grades, meth_concs)
 
 
+gc()
 
 #calculate average methane for each site
 meth_avg <- meth_gis %>% 
   rowwise() %>% 
-  mutate( ch4_mean = mean(Jan_ch4:Dec_ch4)) %>% 
-  select(COMID, ch4_mean, runoff, runoffFL, geometry) %>% 
+  mutate( ch4_mean = mean(Jan_ch4:Dec_ch4),
+          Fch4_mean = mean(Jan_fch4:Dec_fch4),
+          k_mean = mean(Jan_k:Dec_k)) %>% 
+  select(COMID, ch4_mean, Fch4_mean, k_mean, runoff, runoffFL, geometry) %>% 
   st_sf()
 
 
@@ -58,10 +75,6 @@ grid <- st_make_grid(
 
 grid <- st_sf(index = 1:length(lengths(grid)), grid) 
 
-ggplot() +
-  geom_sf(data = grid, fill = "white", color = "black", size = 0.0725) +
-  coord_sf(datum = NA) +
-  theme_minimal()
 
 
 meth_hexes <- st_join(meth_avg, grid, join = st_intersects)
@@ -69,6 +82,7 @@ meth_hexes <- st_join(meth_avg, grid, join = st_intersects)
 meth_hexes_avg <- meth_hexes %>% 
   group_by(index) %>%
   summarise(methane = mean(ch4_mean, na.rm = TRUE),
+            methane.flux = sum(Fch4_mean, na.rm = TRUE),
             runoff= mean(runoff, na.rm = TRUE) ) %>%
   st_sf()  
 
@@ -101,6 +115,7 @@ ggplot() +
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
+    direction = -1,
     #trans = "log10", 
     name = "Methane concentration (umol/L)")+
   guides( fill = guide_colourbar(title.position = "top"))+
@@ -109,6 +124,25 @@ ggplot() +
         legend.direction = "horizontal")
 
 ggsave(filename = "figures/map_ch4.png", dpi=600, height = 10, width = 16)
+
+
+ggplot() +
+  geom_sf(
+    data = meth_hexes_avg2 %>%  mutate(methane.flux= ifelse(methane.flux > 5000,5000, methane.flux)), 
+                                       color = NA, aes( fill = methane.flux) )+
+  geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
+  scale_fill_viridis_c(
+    option = "magma", na.value = "gray",
+    #trans = "log10", 
+    direction = -1,
+    name = "Methane flux")+
+  guides( fill = guide_colourbar(title.position = "top"))+
+  theme_void()+
+  theme(legend.position = c(0.55, 0.15),
+        legend.direction = "horizontal")
+
+ggsave(filename = "figures/map_ch4_flux.png", dpi=600, height = 10, width = 16)
+
 
 
 ch4E_hybas <- read_csv("output/ch4E_hybas.csv")
@@ -121,5 +155,37 @@ ch4E_hybas %>%
   
 
 
-min(ch4E_hybas$ch4_Apr)
+median(meth_avg$Fch4_mean, na.rm=TRUE)
 
+
+ggplot(meth_avg, aes(ch4_mean, Fch4_mean))+
+  geom_hex(bins=50)+
+  scale_x_log10(labels=scales::number)+
+  scale_y_log10(labels=scales::number)+
+  scale_fill_viridis_c()+
+  theme_bw()
+
+grimeDB_attributes %>% 
+  select(CH4mean) %>% 
+  mutate(type="observations") %>% 
+  bind_rows(meth_avg %>% 
+              st_drop_geometry() %>% 
+              select(CH4mean= ch4_mean) %>% 
+              mutate(type="predictions")) %>% 
+ggplot()+
+  geom_density(aes(CH4mean), alpha=.6)+
+  scale_x_log10(labels=scales::number)+
+  facet_wrap(~type, ncol = 1, scales = "free_y")+
+  theme_bw()
+
+min(grimeDB_attributes$CH4mean)
+
+meth_data <- meth_gis %>% 
+  st_drop_geometry() %>% 
+  select(COMID, Jan_ch4:Dec_ch4) %>% 
+  pivot_longer(-COMID, values_to = "CH4mean", names_to = "month")
+
+meth_data %>% 
+  ggplot()+
+  geom_density(aes(CH4mean))+
+  facet_wrap(~month)

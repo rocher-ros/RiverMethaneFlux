@@ -302,7 +302,7 @@ rf_mod <-
     trees = 1200,
     min_n = 21 ) %>%
   set_mode("regression") %>%
-  set_engine("ranger", importance="impurity", num.threads =n.cores, quantreg = TRUE)
+  set_engine("ranger", importance="impurity", num.threads =n.cores)#, quantreg = TRUE) #if getting quantiles
 
 #prepare a workflow with it to feed into the function
 wf <-
@@ -319,12 +319,12 @@ predict_RF_grime <- function(df) {
   train_df <- training(split)
   test_df <- testing(split)
   
-  #folds <- vfold_cv(train_df, v = 10)
+
   
   #create recipe
   recipe_train <- train_df %>% 
-    recipe(Log_CH4mean ~.) %>% 
-    step_normalize(all_predictors(), -all_outcomes())
+    recipe(Log_CH4mean ~.)# %>% 
+    #step_normalize(all_predictors(), -all_outcomes())
 
  #fit workflow on train data
   fit_wf <-
@@ -333,21 +333,21 @@ predict_RF_grime <- function(df) {
     fit(data = train_df) 
   
   #predict on test data
-# preds <- predict(fit_wf, test_df) %>% 
-#   bind_cols(test_df)
+ preds <- predict(fit_wf, test_df) %>% 
+   bind_cols(test_df)
 
  # get quantile regression intervals as 
  # https://www.bryanshalloway.com/2021/04/21/quantile-regression-forests-for-prediction-intervals/ 
   #https://www.jmlr.org/papers/volume7/meinshausen06a/meinshausen06a.pdf
- preds <- predict(
-   fit_wf$fit$fit$fit, 
-   workflows::extract_recipe(fit_wf) %>% bake(test_df),
-   type = "quantiles",
-   quantiles = c(.05, .95, 0.50) ) %>% 
-   with(predictions) %>% 
-   as_tibble() %>% 
-   set_names(paste0(".pred", c("_lower", "_upper", ""))) %>% 
-   bind_cols(test_df)
+ # preds <- predict(
+ #   fit_wf$fit$fit$fit, 
+ #   workflows::extract_recipe(fit_wf) %>% bake(test_df),
+ #   type = "quantiles",
+ #   quantiles = c(.05, .95, 0.50) ) %>% 
+ #   with(predictions) %>% 
+ #   as_tibble() %>% 
+ #   set_names(paste0(".pred", c("_lower", "_upper", ""))) %>% 
+ #   bind_cols(test_df)
  
 
 
@@ -412,6 +412,39 @@ ggplot( aes(.pred, Log_CH4mean))+
 
 ggsave(filename= "figures/model_perf_monthly_adjacent.png", width = 12, height = 8)
 
+#residuals
+monthly_models %>% 
+  unnest(preds) %>%  
+  ggplot( aes(.pred, Log_CH4mean-.pred))+
+  geom_point()+
+  geom_smooth(method="lm")+
+  geom_hline(yintercept = 0)+
+  labs(x="CH4 predictions", y="Residuals")+
+  theme_bw()
+
+
+
+#partial dependence plots, for each month
+for(i in 1:12){
+
+rf_fit <- monthly_models[[2]][i] %>% 
+  fit(data = monthly_models[[3][i])
+
+explainer_rf <- explain_tidymodels(
+  rf_fit, 
+  data = dplyr::select(monthly_models[[3]][i], -Log_CH4mean), 
+  y = monthly_models[[3]][i]$Log_CH4mean,
+  label = "random forest")
+
+pdp_rf <- model_profile(explainer_rf, N = 5000)
+
+data_out <- cbind(pdp_rf$agr_profiles, monthly_models[[1]][i] )
+
+if(i == 1){ pdp_months <- data_out } else{pdp_months <- rbind(pdp_months, data_out)}
+
+}
+
+
 
 ## run the data on the whole dataset, not nesting by month ----
 
@@ -464,7 +497,8 @@ pdp_rf <- model_profile(explainer_rf, N = 5000)
 
 plot(pdp_rf)
 
-ggsave(filename= "figures/partial_depend.png", width = 12, height = 8)
+
+ggsave(filename= "figures/partial_depend.png", width = 14, height = 10)
 
 #residuals
 yearly_preds %>% 
@@ -512,7 +546,7 @@ global_preds_trans <- global_preds %>%
 
 colnames(global_preds_trans)
 
-rm(global_preds, grimeDB_attributes, grimeDB_attr_trans)
+rm(global_preds, grimeDB_attributes)
 gc()
 
 predict_methane <- function(all_models, month, global_predictors) {
@@ -526,12 +560,11 @@ predict_methane <- function(all_models, month, global_predictors) {
      select(-ends_with(setdiff(all_months, month_selected))) %>%
      rename_all(~ str_replace(., month_selected, "month"))
    
-   df_baked <- workflows::extract_recipe(model_month) %>% 
-     bake(df_predictors) 
+   #df_baked <- workflows::extract_recipe(model_month) %>% 
+    # bake(df_predictors) 
    
-   out <- predict(model_month, df_baked)
+   out <- predict(model_month, df_predictors)
 
-  
   colnames(out) <- paste( month.abb[month],  "ch4", sep="_")
   out
 }
@@ -549,6 +582,8 @@ ch4_oct <- predict_methane(monthly_models, 10, global_preds_trans)
 ch4_nov <- predict_methane(monthly_models, 11, global_preds_trans)
 ch4_dec <- predict_methane(monthly_models, 12, global_preds_trans)
 
+ggplot(ch4_jan)+
+  geom_density(aes((Jan_ch4)))
 
 dat_out <- global_preds_trans %>% select(COMID) %>% 
   bind_cols(ch4_jan, ch4_feb, ch4_mar, ch4_apr, ch4_may, ch4_jun,
@@ -561,7 +596,8 @@ dat_out %>%
   pivot_longer(-COMID, values_to = "ch4", names_to = "month") %>% 
 ggplot()+
   geom_density(aes(ch4))+
-  facet_wrap(~month)
+  facet_wrap(~month)+
+  scale_x_log10(labels=scales::number)
 
 
 write_csv(dat_out, "data/processed/meth_predictions.csv")
@@ -609,3 +645,4 @@ for(i in 1:12){
   gc() 
   
 }
+
