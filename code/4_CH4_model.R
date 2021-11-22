@@ -88,7 +88,7 @@ grimeDB_attr_trans %>%
 
 labeller_vars <-  c("Log_CH4mean" = "Log CH4 (umol/L)", "month"= "month", "NPP_yr" = "NPP (yearly)", "elev" = "elevation (m)",
                     "Log_slop" = "Log slope (unitless)", "Log_popdens" = "Log population density (people km2)", "temp_yr" = "Avg yearly temperature (°C)",
-                    "prec_yr" = "Average yearly precipitation (mm)", "T_GRAVEL" = "Sil gravel (%)", "T_SAND"='Soil sand (%w)',
+                    "prec_yr" = "Average yearly precipitation (mm)", "T_GRAVEL" = "Soil gravel (%)", "T_SAND"='Soil sand (%w)',
                     "T_SILT" ='Soil silt (%w)', "T_CLAY"='Soil clay (%w)', "pyearRS" = "Total yearly soil respiration",
                     "Log_T_OC" = "Log Total organic Carbon", "Log_T_CACO3" = "Log CACO3 (%w)" , "Log_T_CASO4" = "Log CASO4 (%w)",
                     "Log_T_ESP" = "Sodicity (%)", "S_PH_H2O" = "Soil pH", "T_CEC_SOIL" = "Soil cation exchange capacity",
@@ -98,7 +98,8 @@ labeller_vars <-  c("Log_CH4mean" = "Log CH4 (umol/L)", "month"= "month", "NPP_y
                     "tavg_month" = "Monthly temperature", "sresp_month" = "Soil respiration", "other_nat_veg" = "Other land cover (yes/no)",
                     "cropland" = "Cropland land cover (yes/no)", "urban" = "Urban land cover (yes/no)",
                     "sparse_veg"= "Sparse vegetation land cover (yes/no)" , "wetland_class"= "Wetland land cover (yes/no)",
-                    "ice"= "Ice land cover (yes/no)", "water_class" = "Water land cover (yes/no)" )
+                    "ice"= "Ice land cover (yes/no)", "water_class" = "Water land cover (yes/no)",
+                    "Log_P_load" ="Log river phosphorus load ()")
 
 
 
@@ -423,28 +424,84 @@ monthly_models %>%
   theme_bw()
 
 
-
-#partial dependence plots, for each month
-for(i in 1:12){
-
-rf_fit <- monthly_models[[2]][i] %>% 
-  fit(data = monthly_models[[3][i])
-
-explainer_rf <- explain_tidymodels(
-  rf_fit, 
-  data = dplyr::select(monthly_models[[3]][i], -Log_CH4mean), 
-  y = monthly_models[[3]][i]$Log_CH4mean,
-  label = "random forest")
-
-pdp_rf <- model_profile(explainer_rf, N = 5000)
-
-data_out <- cbind(pdp_rf$agr_profiles, monthly_models[[1]][i] )
-
-if(i == 1){ pdp_months <- data_out } else{pdp_months <- rbind(pdp_months, data_out)}
-
+#variable importance 
+get_vi_vals <- function(data){
+  data %>% 
+    extract_fit_parsnip() %>% 
+    vi()
 }
 
 
+vi_monthly <- map(monthly_models[[3]], get_vi_vals)  %>% 
+  set_names(monthly_models[[1]]) %>% 
+  map_df( ~as.data.frame(.x), .id="month") %>% 
+  group_by(Variable) %>% 
+  filter(median(Importance)> 50) %>%
+  ungroup() %>% 
+  left_join(tibble::enframe(labeller_vars) %>% rename(label=value), by=c("Variable"="name")  )
+
+vi_monthly_mean <- vi_monthly %>% 
+  group_by(Variable) %>% 
+  summarise(Importance=median(Importance),
+            label=first(label)) %>% 
+  ungroup() %>% 
+  arrange(desc(Importance)) %>% 
+  mutate(label= factor(label, unique(label)))
+
+
+vi_monthly %>% 
+ggplot( aes(x=Importance, 
+              y= reorder(label, Importance, FUN = mean)))+
+  stat_summary( color = "gray80", fill="red4", geom="bar", fun="mean", alpha=.8)+
+  stat_summary(fun.data = mean_se, geom = "linerange", size=1.5, alpha=.6)+
+  scale_x_continuous(expand = c(0,0))+
+  theme_classic()+
+  labs(y="")
+
+ggsave(filename = "figures/VIP_scores_monthly.png")
+
+
+#partial dependence plots, for each month
+for (i in 1:12) {
+  
+  print(i) 
+  
+  this_month <- lapply(monthly_models, `[[`, i)  
+  
+  rf_fit <- this_month[[3]] %>% 
+    fit(data = this_month[[2]])
+  
+  explainer_rf <- explain_tidymodels(
+    rf_fit, 
+    data = dplyr::select(this_month[[2]], -Log_CH4mean), 
+    y = this_month[[2]]$Log_CH4mean,
+    label = "random forest")
+  
+  pdp_rf <- model_profile(explainer_rf, N = 5000)
+  
+  data_out <- cbind(pdp_rf$agr_profiles, this_month[[1]] )
+  
+  if(i == 1){ pdp_months <- data_out } else{  pdp_months <- rbind(pdp_months, data_out)}
+
+
+}
+
+pdp_months %>% 
+  rename(variables = `_vname_`, x=`_x_`, y_hat = `_yhat_`, month=`this_month[[1]]`) %>%
+  filter(variables %in% vi_monthly$Variable) %>% 
+  left_join(tibble::enframe(labeller_vars) %>% rename(label=value), by=c("variables"="name") ) %>% 
+  mutate(month= fct_relevel(month, levels = tolower(month.abb)),
+         label=fct_relevel(label, levels(vi_monthly_mean$label))) %>% 
+  ggplot(aes(x, y_hat))+
+  geom_line(alpha=.7, aes(color=month))+
+  geom_smooth(method="gam", color="black", se=FALSE)+
+  scale_color_viridis_d()+
+  facet_wrap(~label, scales = "free")+
+  theme_classic()+
+  guides(color = guide_legend(override.aes = list(size = 1, alpha=1) ) )
+
+
+ggsave(filename= "figures/model_perf_monthly.png", width = 12, height = 8, dpi=600)
 
 ## run the data on the whole dataset, not nesting by month ----
 
