@@ -6,7 +6,7 @@
 
 # 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip', 'corrr', 'ggpubr', 'DALEXtra')
+package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip', 'corrr', 'ggpubr', 'DALEXtra', 'ggtext')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -47,7 +47,8 @@ grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attribut
 
 colnames(grimeDB_attributes)
   
-
+labeller_vars <- read_csv("data/processed/variables_names.csv") %>% 
+  mutate(label=str_replace(label, "9", ";"))
 
 # Explore the raw data and process before the modelling
 
@@ -81,26 +82,6 @@ grimeDB_attr_trans <- grimeDB_attributes %>%
   #summarise(across(everything(), mean, na.rm=TRUE)) %>% 
   mutate(across(.cols=all_of(vars_to_log), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
   rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
-
-grimeDB_attr_trans %>% 
-  select(-all_of(variables_to_remove)) %>% 
-  colnames(.)
-
-labeller_vars <-  c("Log_CH4mean" = "Log CH4 (umol/L)", "month"= "month", "NPP_yr" = "NPP (yearly)", "elev" = "elevation (m)",
-                    "Log_slop" = "Log slope (unitless)", "Log_popdens" = "Log population density (people km2)", "temp_yr" = "Avg yearly temperature (°C)",
-                    "prec_yr" = "Average yearly precipitation (mm)", "T_GRAVEL" = "Soil gravel (%)", "T_SAND"='Soil sand (%w)',
-                    "T_SILT" ='Soil silt (%w)', "T_CLAY"='Soil clay (%w)', "pyearRS" = "Total yearly soil respiration",
-                    "Log_T_OC" = "Log Total organic Carbon", "Log_T_CACO3" = "Log CACO3 (%w)" , "Log_T_CASO4" = "Log CASO4 (%w)",
-                    "Log_T_ESP" = "Sodicity (%)", "S_PH_H2O" = "Soil pH", "T_CEC_SOIL" = "Soil cation exchange capacity",
-                    "S_BS" = "Base saturation", "S_TEB" = "Soil TEB", "T_BULK_DENSITY" = "Soil bulk density", "Log_uparea" ="Log Catchment area",
-                    "Log_wetland" ="Log wetland cover (%)", "trees" = "Tree cover (%)", "Log_gw_month" ="Log groundwater table depth (m)" ,
-                    "Log_k_month" = "Log gas transfer velocity (m/d)", "gpp_month" = "Monthly GPP", "precip_month" = "Monthly precipitation",
-                    "tavg_month" = "Monthly temperature", "sresp_month" = "Soil respiration", "other_nat_veg" = "Other land cover (yes/no)",
-                    "cropland" = "Cropland land cover (yes/no)", "urban" = "Urban land cover (yes/no)",
-                    "sparse_veg"= "Sparse vegetation land cover (yes/no)" , "wetland_class"= "Wetland land cover (yes/no)",
-                    "ice"= "Ice land cover (yes/no)", "water_class" = "Water land cover (yes/no)",
-                    "Log_P_load" ="Log river phosphorus load ()")
-
 
 
 #Do again some histograms with the log transformed variables
@@ -435,10 +416,10 @@ get_vi_vals <- function(data){
 vi_monthly <- map(monthly_models[[3]], get_vi_vals)  %>% 
   set_names(monthly_models[[1]]) %>% 
   map_df( ~as.data.frame(.x), .id="month") %>% 
+  left_join(labeller_vars, by=c("Variable"="var")  )  %>%
   group_by(Variable) %>% 
   filter(median(Importance)> 50) %>%
-  ungroup() %>% 
-  left_join(tibble::enframe(labeller_vars) %>% rename(label=value), by=c("Variable"="name")  )
+  ungroup() 
 
 vi_monthly_mean <- vi_monthly %>% 
   group_by(Variable) %>% 
@@ -451,14 +432,17 @@ vi_monthly_mean <- vi_monthly %>%
 
 vi_monthly %>% 
 ggplot( aes(x=Importance, 
-              y= reorder(label, Importance, FUN = mean)))+
-  stat_summary( color = "gray80", fill="red4", geom="bar", fun="mean", alpha=.8)+
+              y=  reorder(label, Importance, FUN = mean)))+
+  stat_summary( aes(fill = type), color=NA, geom="bar", fun="mean", alpha=.8)+
   stat_summary(fun.data = mean_se, geom = "linerange", size=1.5, alpha=.6)+
   scale_x_continuous(expand = c(0,0))+
+  scale_fill_manual(values=c("forestgreen", "dodgerblue3", "brown3", "gray50", "chocolate"), name="Category")+
   theme_classic()+
-  labs(y="")
+  labs(y="")+
+  #scale_y_discrete(labels = scales::parse_format() )+
+  theme(legend.position = c(.85,.12), axis.text.y =ggtext::element_markdown())
 
-ggsave(filename = "figures/VIP_scores_monthly.png")
+ggsave(filename = "figures/VIP_scores_monthly.png", height = 8, width = 6, dpi=500)
 
 
 #partial dependence plots, for each month
@@ -501,7 +485,7 @@ pdp_months %>%
   guides(color = guide_legend(override.aes = list(size = 1, alpha=1) ) )
 
 
-ggsave(filename= "figures/model_perf_monthly.png", width = 12, height = 8, dpi=600)
+ggsave(filename= "figures/partial_depend_monthly.png", width = 12, height = 8, dpi=600)
 
 ## run the data on the whole dataset, not nesting by month ----
 
