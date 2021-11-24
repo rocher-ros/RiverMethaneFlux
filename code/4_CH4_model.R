@@ -89,12 +89,14 @@ grimeDB_attr_trans <- grimeDB_attributes %>%
 grimeDB_attr_trans %>% 
   select(-all_of(variables_to_remove)) %>% 
   pivot_longer(cols = everything(), names_to = "predictor", values_to = "value" ) %>% 
+  left_join(labeller_vars, by=c("predictor"="var")  )  %>%
   ggplot(aes(value))+
     geom_histogram(bins = 80) +
     theme_classic()+
-    facet_wrap(~predictor, scales='free')
+    facet_wrap(~label, scales='free')+
+  theme(strip.text = ggtext::element_markdown())
 
-#ggsave("figures/histograms_transformed.png", width=16, height = 12)
+ggsave("figures/histograms_transformed.png", width=16, height = 12)
 
 
 
