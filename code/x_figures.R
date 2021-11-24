@@ -325,6 +325,25 @@ ggarrange(obs_flux_k, obs_flux_slope, nrow = 1)
 
 ggsave("figures/k_flux_observed.png", width = 11, height = 5)
 
+#ebullition
+flux_comid %>% 
+  filter(Eb_CH4_Flux_Mean>0.00001) %>% 
+  filter(k_method == "chamber + conc") %>% 
+  ggplot(aes(Diffusive_CH4_Flux_Mean, Eb_CH4_Flux_Mean ))+
+  geom_point( aes( color=Site_Nid), size=4, alpha=.4)+
+  geom_smooth( method="lm", se=FALSE, color="red3", size=2, linetype=2)+
+  geom_abline(intercept = 0, slope = 1)+
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))+
+  stat_regline_equation(label.y.npc = .9)+
+  scale_y_log10(labels=scales::number)+
+  scale_x_log10(labels=scales::number)+
+  theme_classic()+
+  theme(legend.position = "none")+
+  labs(x="Diffusive CH4 flux", y="Ebulitive flux", caption="Each color is a unique site in the DB",
+       title=" Only ebullitive fluxes were k comes from chamber+conc")
+
+
+
 #look at spatial aggregation of COMID to sites
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
   filter(`Aggregated?` == "No",

@@ -26,7 +26,7 @@ The predictors selected are shown below. Several have been removed due to high c
 
 I did some grid-tuning to find the optimal hyperparameters for the random forest model, ending up with `mtry = 10, trees = 1200, min_n = 21`. I also tried running a model with the whole dataset, or an independent RF model for each month.
 
-The random forest model seems to do OK, with an average $R^{2}= 0.5$.
+The random forest model seems to do OK, with an average R<sup>2</sup>= 0.5.
 
 One problem I find is that monthly models are often very different among them, given that the number of sites changes a lot month to month as well as the spatial coverage. Thus it not only captures seasonal changes but also the (changing) geographical coverage of the data. One solution to maintain spatial coherence as well as the seasonality is for each month, feed the data of the given month and the adjacent months (e.g. for march use the data form february, march and april). This makes the model more homogeneous and robust, as well as an increase in predictive power.
 
@@ -42,6 +42,8 @@ Another way to look at the role of each model is at partial dependence plots of 
 
 ## Upscaling
 
+To get a global flux number I still need to double check the scripts, so a bit later on that.
+
 GRiMeDB has several thousand measured fluxes, so we can take advantage of this data to validate the predicted fluxes. I do this by matching predicted flux values to the corresponding flux observation for a given month.
 
 ![](figures/flux_comp_boxplot.png)
@@ -50,15 +52,21 @@ I can also back-calculate k from observations by dividing flux (mmol m<sup>-2</s
 
 ![](figures/flux_comp_allk.png)
 
-Things are on the same ballpark, which is a good start. Color shows how different predicted k values, seems like the values more off from the 1:1 line are sites with k differing a lot. A couple things to take into account here:
+Things are on the same ballpark, which is a good start. Color shows how different predicted k values are. It seems like the values more off from the 1:1 line are sites with k differing a lot. A couple things to take into account here:
 
--   Modelled k is estimated from estimated slope and modelled discharge, long-term averaged monthly value, for a several kilometres river reach, using a hydraulic equation.
+-   Modelled k is estimated from estimated slope and long-term averaged monthly modelled discharge, for a several kilometres river reach, using a hydraulic equation.
 
 -   Measured k contains a mix of k estimates, most often derived from chambers, some slug gas releases, some from (multiple) hydraulic equations. So a wild mix here, and in the case of the chamber estimates is a quite local k estimate compared to a reach estimate. Ah, and it also flux dependent so it may be overestimated due to ebullition.
 
 So this is a bit of an apples with oranges thing here. If we restrict the comparison of modelled vs predicted fluxes to sites with similar k (+/- 50%), things actually look quite neat.
 
 ![](figures/flux_comp_similark.png)
+
+### Ebullition?
+
+Including ebullition is the next thing. One option is to do a rough estimate based on diffusive fluxes, as in the observations in GRIME we have an OK relationship, as well as other literature.
+
+![](figures/ebulliton_diffusion.png)
 
 ## Problems?
 
