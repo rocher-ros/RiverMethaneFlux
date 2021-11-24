@@ -93,3 +93,5 @@ This is more apparent when we look at k vs flux, and we see that higher fluxes a
 This is not the relationship we see on the empirical data though. First plot is for the sites I could back-calculate k , and second plot is more data with reach slope instead of k.
 
 ![](figures/k_flux_observed.png)
+
+This has implications in the spatial patterns of methane, as in the map of concentrations mountain areas have low concentrations (as expected), but are instead hotspots of emissions. One patch to this problem is to cap k, or fluxes, in mountain areas.
