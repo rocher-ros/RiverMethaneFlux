@@ -1,5 +1,5 @@
 # Info ------
-# Author: Gerard Rocher-Ros, modified from Shaoda Liu
+# Author: Shaoda Liu but heavily modified by Gerard Rocher-Ros
 # Script upscale CH4 emissions in rivers globally.
 
 
@@ -208,3 +208,8 @@ k <- vel %>%
 
 #saving the results
 write_csv(df,'data/processed/q_and_k.csv')
+
+#upload to drive
+drive_upload(media = "data/processed/q_and_k.csv",
+             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/q_and_k.csv",
+             overwrite = TRUE)

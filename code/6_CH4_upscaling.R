@@ -111,11 +111,11 @@ df<- df %>% mutate(
         0.074 * log(yeaQcv) - 0.026 * log(runoffFL) - 0.011 * 10 + 0.36,
       log(runoffFL) > 8.5 & log(yeaQmean) > 10 ~
         0.074 * log(yeaQcv) - 0.026 * 8.5 - 0.011 * 10 + 0.36
-      )
+      ),
+    WidthExp = ifelse(WidthExp <= quantile(WidthExp, 0.01), quantile(WidthExp, 0.01), WidthExp)
   )
 
-df[df$WidthExp <= quantile(df$WidthExp, 0.01), ]$WidthExp <-
-  quantile(df$WidthExp, 0.01)
+
 
 #calc at-a-station coefs and monthly width
 df <-
@@ -436,12 +436,16 @@ df_2<-
     NovWidth=NovWidth*rt,
     DecWidth=DecWidth*rt)
 
-df_2<-df_2[,!names(df_2)%in%c('yeaWidth')]
-names(df_2)[names(df_2)%in%c('width_mean')]<-'yeaWidth'
-df_2<-df_2[,names(df_1)]
-if(sum(names(df_1)==names(df_2))==ncol(df_1)){
-  df<-rbind(df_1,df_2)}else{print('GRWL width is not added sucessfully!')}
-rm(df_1,df_2)
+df_2 <- df_2[, !names(df_2) %in% c('yeaWidth')]
+names(df_2)[names(df_2) %in% c('width_mean')] <- 'yeaWidth'
+df_2 <- df_2[, names(df_1)]
+if (sum(names(df_1) == names(df_2)) == ncol(df_1)) {
+  df <-
+    rbind(df_1, df_2)
+} else{
+  print('GRWL width is not added sucessfully!')
+}
+rm(df_1, df_2)
 gc()
 
 ####join hydroBAS atts####
@@ -494,20 +498,6 @@ runoff<-runoff%>%dplyr::mutate(
 hydroBAS<-left_join(hydroBAS,runoff,by='HYBAS_ID')
 rm(runoff)
 
-# #join ann gpp npp
-# anngppnpp<-read_csv('/output/table/HydroBASINSatts/annPP.csv'),col_types=cols(.default='d',HYBAS_ID='c'))
-# hydroBAS<-left_join(hydroBAS,anngppnpp,by='HYBAS_ID')
-# rm(anngppnpp)
-# #join mon gpp npp
-# mongppnpp<-read_csv(paste0(wd,'/output/table/HydroBASINSatts/monPP_new.csv'),col_types=cols(.default='d',HYBAS_ID='c'))
-# hydroBAS<-left_join(hydroBAS,mongppnpp,by='HYBAS_ID')
-# rm(mongppnpp)
-# #join soil respiration
-# soilResp<-read_csv(paste0(wd,'/output/table/HydroBASINSatts/soilResp_buffer.csv'),col_types=cols(.default='d',HYBAS_ID='c'))
-# #gCm-2yr-1
-# soilResp[,paste0('pRS_',str_pad(1:12,2,pad='0'))]<-sapply(soilResp[,paste0('pRS_',str_pad(1:12,2,pad='0'))],function(x){x*365})
-# hydroBAS<-left_join(hydroBAS,soilResp,by='HYBAS_ID')
-# rm(soilResp)
 ####join part1####
 #join pc02_1
 ch4_1<-
@@ -891,12 +881,21 @@ for (Mon in month.abb) {
 # rm(hydroBAS_res1,hydroBAS_res2,icecov,basinArea_h,GRWLwidth)
 gc()
 
-write_csv(hydroBAS, 'output/ch4E_hybas.csv')
+write_csv(hydroBAS, 'data/processed/ch4E_hybas.csv')
 
 df %>% 
   dplyr::select(-ends_with(c("Ta", "dryout"))) %>% 
-  write_csv( "output/grades_ch4_k_q.csv")
+  write_csv( "data/processed/grades_ch4_k_q.csv")
 
+
+#upload to drive
+drive_upload(media = "data/processed/ch4E_hybas.csv",
+             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/ch4E_hybas.csv",
+             overwrite = TRUE)
+
+drive_upload(media = "data/processed/grades_ch4_k_q.csv",
+             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grades_ch4_k_q.csv",
+             overwrite = TRUE)
 
 
 

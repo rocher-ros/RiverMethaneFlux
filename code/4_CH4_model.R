@@ -52,18 +52,6 @@ labeller_vars <- read_csv("data/processed/variables_names.csv") %>%
 
 # Explore the raw data and process before the modelling
 
-#histograms of all variables, some will need logtansformation
-grimeDB_attributes %>%
-  pivot_longer(cols = everything(), names_to = "variable", values_to = "value" ) %>% 
-  ggplot(aes(value))+
-  geom_histogram(bins = 80) +
-  theme_classic()+
-  facet_wrap(~variable, scales='free')
-
-#ggsave("figures/histograms_rawdata.png", width=16, height = 12)
-
-
-
 # we will log transform those to start with
 vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
                  'T_ESP', "N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture",
@@ -78,8 +66,6 @@ variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S
 
 #dataset with some variables log transformed
 grimeDB_attr_trans <- grimeDB_attributes %>%
-  #group_by(Site_Nid) %>% # this was to check if grouping by sites (collapsing temporal variability) changes things. It does
-  #summarise(across(everything(), mean, na.rm=TRUE)) %>% 
   mutate(across(.cols=all_of(vars_to_log), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
   rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
@@ -343,11 +329,12 @@ return(list(preds, fit_wf, train_df))
 
 #prepare a dataset, nesting by month
 data_model_nested <- grimeDB_attr_trans %>% 
+  #group_by(COMID, month) %>% 
+  #summarise(across(everything(), mean)) %>%
+  #ungroup() %>% 
   select(-all_of(variables_to_remove)) %>% 
-  drop_na()# %>% 
-  #group_by(month) %>% 
-  #nest() %>% 
-  #arrange(month)
+  drop_na()
+
 
 set.seed(123)
 
@@ -648,44 +635,3 @@ write_csv(dat_out, "data/processed/meth_predictions.csv")
 drive_upload(media = "data/processed/meth_predictions.csv",
              path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/meth_predictions.csv",
              overwrite = TRUE)
-
-
-#predict methane with quantile intervals ----
-#takes a lot of computational power and memory, so I need to split it in half each month
-
-predict_methane_interval <- function(all_models, month, global_predictors) {
-  all_months <- tolower(month.abb)
-  
-  month_selected <- all_months[month]
-  
-  model_month <- all_models$model_fit[[month]]
-  
-  out <-  predict(
-    model_month$fit$fit$fit, 
-    workflows::extract_recipe(model_month) %>% 
-      bake(global_predictors %>%
-             select(-ends_with(setdiff(all_months, month_selected))) %>%
-             rename_all(~ str_replace(., month_selected, "month"))),
-    type = "quantiles",
-    quantiles = c(.1, .9, 0.5) ) %>% 
-    with(predictions) %>% 
-    as_tibble() 
-  
-  colnames(out) <- paste( month.abb[month], c( "ch4_lower", "ch4_upper", "ch4_mid"), sep="_")
-  out
-}
-
-for(i in 1:12){
-  
-  ch4_1 <- predict_methane_interval(monthly_models, i, global_preds_trans[1:1500000,])
-  gc()
-  ch4_2 <- predict_methane_interval(monthly_models, i, global_preds_trans[1500001:2898499,])
-  
-  bind_cols(ch4_1, ch4_2) %>% 
-    mutate(across(ends_with("ch4"), ~exp(.x)-.1)) %>% 
-    write_csv(paste0("data/raw/meth_preds_quantiles/meth_pred_",tolower(month.abb)[i],".csv"))
-  rm(ch4_1, ch4_2)
-  gc() 
-  
-}
-

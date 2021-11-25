@@ -1,6 +1,6 @@
 # Info ------
 # Author: Gerard Rocher-Ros
-# Script upscale CH4 emissions in rivers globally.
+# Script make some figures of CH4 emissions in rivers globally.
 
 
 # 0. Load  and install packages ----
@@ -17,9 +17,28 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 lapply(package_list, require, character.only = TRUE)
 
 # 1. Load files ----
+if(file.exists("data/processed/grades_ch4_k_q.csv") == TRUE) {
+  print("files already downloaded")
+} else {
+  drive_download(
+    "SCIENCE/PROJECTS/RiverMethaneFlux/processed/grades_ch4_k_q.csv",
+    path = "data/processed/grades_ch4_k_q.csv",
+    overwrite = TRUE
+  )
+}
+
+if(file.exists("data/processed/grades_coords.csv") == TRUE) {
+  print("files already downloaded")
+} else {
+  drive_download(
+    "SCIENCE/PROJECTS/RiverMethaneFlux/processed/grades_coords.csv",
+    path = "data/processed/grades_coords.csv",
+    overwrite = TRUE
+  )
+}
 
 #upscaled methane concentrations
-meth_concs <- read_csv("output/grades_ch4_k_q.csv", lazy = FALSE)
+meth_concs <- read_csv("data/processed/grades_ch4_k_q.csv", lazy = FALSE)
 
 #read coordinates from grades
 grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv", lazy = FALSE) %>% 
@@ -171,13 +190,14 @@ ggplot(meth_avg, aes(k_mean, Fch4_mean))+
 ggsave("figures/k_flux_predicted.png")
 
 
-ch4E_hybas <- read_csv("output/ch4E_hybas.csv")
+ch4E_hybas <- read_csv("data/processed/ch4E_hybas.csv")
 
 ch4E_hybas %>% 
   summarise(across(ch4E_Jan:ch4E_Dec, sum)) %>% 
   pivot_longer( everything(), names_to = "month", values_to = "flux") %>% 
-  mutate(per_day=flux/12) %>% 
-  summarise(sum=sum(per_day))
+  mutate(per_day=flux/365,
+         n_days=c(31,28,31,30,31,30,31,31,30,31,30,31)) %>% 
+  summarise(sum=sum(per_day*n_days)) /1000*16/12 #in TgCH4
   
 
 ## Flux comparison with grime ----
@@ -209,7 +229,8 @@ mean(flux_comid$Diffusive_CH4_Flux_Mean, na.rm=TRUE)
 
 #now join the observed fluxes and predicted into one df. I will filter the sites that are not well snapped (>100m)
 flux_comp <- flux_comid %>% 
-  select(COMID, Site_Nid, date= Date_start, distance_snapped, CH4mean, Diffusive_CH4_Flux_Mean, Diff_Method, k_method ) %>% 
+  select(COMID, Site_Nid, date= Date_start, distance_snapped, CH4mean, 
+         Diffusive_CH4_Flux_Mean, Diff_Method, k_method ) %>% 
   filter(distance_snapped < 100) %>% 
   left_join( meth_gis %>% st_drop_geometry(), by="COMID") %>% 
   drop_na(Diffusive_CH4_Flux_Mean) %>% 
@@ -342,7 +363,7 @@ flux_comid %>%
   labs(x="Diffusive CH4 flux", y="Ebulitive flux", caption="Each color is a unique site in the DB",
        title=" Only ebullitive fluxes were k comes from chamber+conc")
 
-
+ggsave("figures/ebulliton_diffusion.png")
 
 #look at spatial aggregation of COMID to sites
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
@@ -357,6 +378,7 @@ sites_many_obs <- grimeDB_attributes %>%
   #filter(n_obs > 20) %>% 
   left_join(grimeDB_attributes %>% select(COMID, Site_Nid, date, CH4mean, lat, lon))
 
+# the example of krycklan
 grimeDB_attributes %>% 
   filter(COMID == 24006204, CH4mean > .0001) %>% 
   ggplot()+
