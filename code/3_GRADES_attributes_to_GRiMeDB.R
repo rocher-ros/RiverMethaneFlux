@@ -185,6 +185,21 @@ conc_df_comids <- conc_df %>%
   mutate(CH4mean =ifelse(CH4mean < 0, 0.0001, CH4mean)) %>% 
   drop_na(CH4mean)
 
+## attach  COMID to the flux df and keep useful variables
+flux_df %>% 
+  drop_na(Diffusive_CH4_Flux_Median) %>% 
+  select(Site_Nid,Date_start,  Diffusive_CH4_Flux_Median, Diffusive_CH4_Flux_Mean ) %>% 
+  print(n=100)
+
+flux_df_comids <- flux_df %>% 
+  filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
+  left_join(sites_clean, by="Site_Nid") %>% 
+  dplyr::select(Site_Nid, `Aggregated?`, Channel_type, COMID, distance_snapped, slope_m_m, Eb_CH4_Flux_Mean, 
+                Diffusive_CH4_Flux_Mean, date= Date_start  ) %>% 
+  mutate(Diffusive_CH4_Flux_Mean =ifelse(Diffusive_CH4_Flux_Mean < 0, 0, Diffusive_CH4_Flux_Mean),
+         Eb_CH4_Flux_Mean =ifelse(Eb_CH4_Flux_Mean < 0, 0, Eb_CH4_Flux_Mean)) 
+
+
 # Gw has some gaps, fix it
 grades_gw_sf <- grades_latlon %>% 
   left_join(gwTable, by="COMID") %>% 
@@ -260,7 +275,7 @@ drive_upload(media = "data/processed/grade_attributes.csv",
              overwrite = TRUE)
 
 
-#Now attach all the annual variables to each pair of site_obs
+#Now attach all the annual variables to each pair of site_obs in the conc df 
 grimeDB_attributes <- conc_df_comids %>% 
   left_join(grades_attributes, by="COMID")
 
@@ -377,4 +392,120 @@ grimeDB_attributes_mon %>%
 drive_upload(media = "data/processed/grimeDB_concs_with_grade_attributes.csv",
              path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grimeDB_concs_with_grade_attributes.csv",
              overwrite = TRUE)
+
+# attach predictors to the flux df ----
+#Now attach all the annual variables to each pair of site_obs in the conc df 
+grimeDBflux_attributes <- flux_df_comids %>% 
+  left_join(grades_attributes, by="COMID")
+
+# Now we do the monthly resolved variables, needs some thinking...
+# Ok the way is to check the month of each observation and then match the value of a given variable
+grimeDBflux_attributes_mon <- grimeDBflux_attributes %>% 
+  mutate( gw_month = case_when(month(date) == 1 ~ gw_jan,
+                               month(date) == 2 ~ gw_feb,
+                               month(date) == 3 ~ gw_mar,
+                               month(date) == 4 ~ gw_apr,
+                               month(date) == 5 ~ gw_may,
+                               month(date) == 6 ~ gw_jun,
+                               month(date) == 7 ~ gw_jul,
+                               month(date) == 8 ~ gw_aug,
+                               month(date) == 9 ~ gw_sep,
+                               month(date) == 10 ~ gw_oct,
+                               month(date) == 11 ~ gw_nov,
+                               month(date) == 12 ~ gw_dec),
+          k_month =  case_when(month(date) == 1 ~  k_jan,
+                               month(date) == 2 ~  k_feb,
+                               month(date) == 3 ~  k_mar,
+                               month(date) == 4 ~  k_apr,
+                               month(date) == 5 ~  k_may,
+                               month(date) == 6 ~  k_jun,
+                               month(date) == 7 ~  k_jul,
+                               month(date) == 8 ~  k_aug,
+                               month(date) == 9 ~  k_sep,
+                               month(date) == 10 ~ k_oct,
+                               month(date) == 11 ~ k_nov,
+                               month(date) == 12 ~ k_dec),
+          gpp_month = case_when(month(date) == 1 ~ gpp_jan,
+                                month(date) == 2 ~ gpp_feb,
+                                month(date) == 3 ~ gpp_mar,
+                                month(date) == 4 ~ gpp_apr,
+                                month(date) == 5 ~ gpp_may,
+                                month(date) == 6 ~ gpp_jun,
+                                month(date) == 7 ~ gpp_jul,
+                                month(date) == 8 ~ gpp_aug,
+                                month(date) == 9 ~ gpp_sep,
+                                month(date) == 10 ~ gpp_oct,
+                                month(date) == 11 ~ gpp_nov,
+                                month(date) == 12 ~ gpp_dec),
+          npp_month = case_when(month(date) == 1 ~ npp_jan,
+                                month(date) == 2 ~ npp_feb,
+                                month(date) == 3 ~ npp_mar,
+                                month(date) == 4 ~ npp_apr,
+                                month(date) == 5 ~ npp_may,
+                                month(date) == 6 ~ npp_jun,
+                                month(date) == 7 ~ npp_jul,
+                                month(date) == 8 ~ npp_aug,
+                                month(date) == 9 ~ npp_sep,
+                                month(date) == 10 ~ npp_oct,
+                                month(date) == 11 ~ npp_nov,
+                                month(date) == 12 ~ npp_dec),
+          temp_month = case_when(month(date) == 1 ~ temp_jan,
+                                 month(date) == 2 ~ temp_feb,
+                                 month(date) == 3 ~ temp_mar,
+                                 month(date) == 4 ~ temp_apr,
+                                 month(date) == 5 ~ temp_may,
+                                 month(date) == 6 ~ temp_jun,
+                                 month(date) == 7 ~ temp_jul,
+                                 month(date) == 8 ~ temp_aug,
+                                 month(date) == 9 ~ temp_sep,
+                                 month(date) == 10 ~ temp_oct,
+                                 month(date) == 11 ~ temp_nov,
+                                 month(date) == 12 ~ temp_dec),
+          precip_month = case_when(month(date) == 1 ~ prec_jan/31*365,
+                                   month(date) == 2 ~ prec_feb/28*365,
+                                   month(date) == 3 ~ prec_mar/31*365,
+                                   month(date) == 4 ~ prec_apr/30*365,
+                                   month(date) == 5 ~ prec_may/31*365,
+                                   month(date) == 6 ~ prec_jun/30*365,
+                                   month(date) == 7 ~ prec_jul/31*365,
+                                   month(date) == 8 ~ prec_aug/31*365,
+                                   month(date) == 9 ~ prec_sep/30*365,
+                                   month(date) == 10 ~ prec_oct/31*365,
+                                   month(date) == 11 ~ prec_nov/30*365,
+                                   month(date) == 12 ~ prec_dec/31*365),
+          tavg_month = case_when(month(date) == 1 ~ tavg_jan,
+                                 month(date) == 2 ~ tavg_feb,
+                                 month(date) == 3 ~ tavg_mar,
+                                 month(date) == 4 ~ tavg_apr,
+                                 month(date) == 5 ~ tavg_may,
+                                 month(date) == 6 ~ tavg_jun,
+                                 month(date) == 7 ~ tavg_jul,
+                                 month(date) == 8 ~ tavg_aug,
+                                 month(date) == 9 ~ tavg_sep,
+                                 month(date) == 10 ~ tavg_oct,
+                                 month(date) == 11 ~ tavg_nov,
+                                 month(date) == 12 ~ tavg_dec),
+          sresp_month = case_when(month(date) == 1 ~ pRS_jan*365,
+                                  month(date) == 2 ~ pRS_feb*365,
+                                  month(date) == 3 ~ pRS_mar*365,
+                                  month(date) == 4 ~ pRS_apr*365,
+                                  month(date) == 5 ~ pRS_may*365,
+                                  month(date) == 6 ~ pRS_jun*365,
+                                  month(date) == 7 ~ pRS_jul*365,
+                                  month(date) == 8 ~ pRS_aug*365,
+                                  month(date) == 9 ~ pRS_sep*365,
+                                  month(date) == 10 ~ pRS_oct*365,
+                                  month(date) == 11 ~ pRS_nov*365,
+                                  month(date) == 12 ~ pRS_dec*365) ) %>%
+  dplyr::select(!ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")))
+
+
+#save to file and upload to google drive
+grimeDBflux_attributes_mon %>% 
+  write_csv("data/processed/grimeDB_flux_with_grade_attributes.csv")  
+
+drive_upload(media = "data/processed/grimeDB_concs_with_grade_attributes.csv",
+             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grimeDB_concs_with_grade_attributes.csv",
+             overwrite = TRUE)
+
 
