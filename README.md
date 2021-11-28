@@ -86,6 +86,10 @@ This affects the model in two ways. On one side it overfits because same sites a
 
 A solution here would be to aggregate data by a GRADES reach and month, another solution is to throw away sites that are snapped more than x m.
 
+#### Update on this
+
+Ok good news, running the model with data aggregated by GRADES reach and month performs equally well ![](figures/model_perf_monthly_adjacent_aggr_COMID.png)
+
 ### k, my little obsession
 
 So I included k in the model, and arises as an important predictor of CH4 concentrations. A good check is to look at how modelled k relates to modelled CH4.
@@ -94,12 +98,14 @@ So I included k in the model, and arises as an important predictor of CH4 concen
 
 So far so good. That's what it should be. The problem however is that k ranges up to 2000 m d^-1. I am not saying that such high k are impossible, but the marginal effect on the flux should be negligible. In other words, CH4 is still predicted to be above saturation, but the CH4 flux at 50 vs 2000 m d^-1 should be relatively similar and not 40 times higher.
 
-This is more apparent when we look at k vs flux, and we see that higher fluxes are at higher k.
+This is more apparent when we look at k vs flux, and we see that higher fluxes are at higher k. Black points and read smooth line show real measured fluxes
 
-![](figures/k_flux_predicted.png)
+![](figures/k_flux_pred_obs.png)
 
-This is not the relationship we see on the empirical data though. First plot is for the sites I could back-calculate k , and second plot is more data with reach slope instead of k.
+This has implications in the spatial patterns of methane, as in the map of concentrations mountain areas have low concentrations (as expected), but are instead hotspots of emissions.
 
-![](figures/k_flux_observed.png)
+A similar pattern is observed with concentrations
 
-This has implications in the spatial patterns of methane, as in the map of concentrations mountain areas have low concentrations (as expected), but are instead hotspots of emissions. One patch to this problem is to cap k, or fluxes, in mountain areas.
+![](figures/k_conc_pred_obs.png)
+
+The vertical dashed line shows a k of 35 m/d, which is the maximum theoretical diffusive rate (Ulseth et al. 2018). Above that bubble mediated flux plays a big role. We do account for that when estimating k, but the effect of that on predicting concentrations should be more pronounced. Thus we results with a relatively high concentrations at high k, with unrealistically high fluxes. I tried capping k at 50 to start with, but it still shows the highest fluxes at the highest k, which is not really the case for the observations
