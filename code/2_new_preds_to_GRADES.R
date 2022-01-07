@@ -287,7 +287,7 @@ gw_to_upload <-  full_files[grepl("gwTable", full_files)]
 
 map2(gw_to_upload, gw_path_in_drive, drive_upload)
 
-# Try to get land cover data into grades as well ----
+# Land cover data into grades as well ----
 dir.create("data/raw/gis/")
 dir.create("data/raw/gis/GRADES_attributes")
 
@@ -381,7 +381,7 @@ write_csv(dat_good, "data/raw/gis/GRADES_attributes/land_good.csv")
 #upload the file to google drive
 drive_upload("data/raw/gis/GRADES_attributes/land_good.csv", "SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes/land_good.csv")
 
-# process the nutrient data ---
+# process the nutrient data ----
 
 #find the names of the nitrogen and phosphorus files
 files_nitrogen <- list.files("data/raw/gis/nutrients freshwater/nitrogen/2000/", full.names = TRUE)
@@ -451,3 +451,94 @@ drive_upload("data/raw/gis/GRADES_attributes/nutrients_water.csv",
              "SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes/nutrients_water.csv")
 
 
+# Get the human footprint ----
+#load raster file 
+human_footprint <-raster("data/raw/gis/HumanFootprint/Maps/HFP2009.tif")
+
+#get grades back in
+files <- list.files("data/raw/grades")[grepl(".shp$", list.files("data/raw/grades"))]
+
+shape_files <- paste("data/raw/grades", files[grepl(".shp$", files)], sep="/") 
+shapes_catchments <- shape_files[grepl("cat", shape_files)]
+
+
+for(i in 1:length(shapes_catchments)){
+  
+catchment <- read_sf(shapes_catchments[i]) %>% 
+  st_set_crs(4326)%>% 
+  st_transform(crs(human_footprint))
+
+footprint_area <- crop(human_footprint, st_bbox(catchment))
+
+#the velox  is the fastest for this task
+vx <- velox(footprint_area, extent=extent(footprint_area), res=res(footprint_area),
+            crs=crs(footprint_area))
+print("velox done")
+tic("extracting")
+monthly <- vx$extract(sp=catchment, fun=mean)
+toc()
+
+#turn into a df
+monthly_df <- as.data.frame(monthly)
+colnames(monthly_df) <- c("hfi")
+monthly_df$COMID <- catchment$COMID
+
+print(i)
+write_csv(monthly_df, paste("data/raw/gis/GRADES_attributes/human_footprint_",i,".csv"))
+
+rm(catchment, vx, footprint_area)
+gc()
+}
+
+
+#get the fertilizer data  
+nh4 <- terra::rast("data/raw/gis/fertilizer inputs/NH4_input_ver1.nc4")
+no3 <- terra::rast("data/raw/gis/fertilizer inputs/NO3_input_ver1.nc4")
+
+grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326)
+
+nh4  <- terra::subst(nh4, c(NA, NaN), 0)
+no3  <- terra::subst(no3, c(NA, NaN), 0)
+
+
+nh4_avg <- sum(nh4[[480:600]], na.rm= TRUE)
+no3_avg <- sum(no3[[480:600]], na.rm= TRUE)
+
+nh4_vals <- terra::extract( nh4_avg, st_coordinates(grades))
+
+no3_vals <- terra::extract( no3_avg, st_coordinates(grades)) 
+
+dat_out <- tibble(COMID =grades$COMID, 
+                  nh4_input = nh4_vals$sum,
+                  no3_input = no3_vals$sum) %>% 
+  mutate(nh4_input = ifelse(is.na(nh4_input) == TRUE, 0, nh4_input),
+         no3_input = ifelse(is.na(no3_input) == TRUE, 0, no3_input ))
+
+dat_out %>% filter(is.na(nh4_input) == TRUE)
+
+write_csv(dat_out, "data/raw/gis/GRADES_attributes/fertilizers.csv")
+
+
+# Mountains ----
+
+sf::sf_use_s2(FALSE)
+
+grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326)
+
+
+mountains <- read_sf("data/raw/gis/global_mountains/CMEC_Mountains_Enh2018.shp") %>% 
+  st_transform(4326)
+
+ggplot(mountains)+
+  geom_sf(fill="red4")
+
+data_out <- st_join(grades, mountains) %>% 
+  mutate(mountains = if_else(is.na(OBJECTID) == FALSE, 1, 0)) %>% 
+  dplyr::select(COMID, mountains) %>% 
+  st_drop_geometry()
+
+
+
+write_csv(data_out, "data/raw/gis/GRADES_attributes/mountains.csv")

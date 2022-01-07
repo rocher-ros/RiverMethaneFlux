@@ -42,37 +42,19 @@ timedryout_calculater <- function(Q) {
 }
 
 # 1. Load files ----
-
-# load file with discharge and k data 
-hydro_k <- read_csv("data/processed/q_and_k.csv")# %>% 
- # mutate(across(ends_with("_k"), ~ifelse(.x > 100, 100, .x))) #trying to see what happens when we cap k at 100
+hydro_k <- read_csv("data/raw/gis/GRADES_attributes/q_and_k.csv")
 
 #upscaled methane concentrations
-meth_concs <- read_csv("data/processed/meth_predictions.csv") 
+meth_flux <- read_csv("data/processed/meth_flux_predictions.csv") %>% 
+  rename_at(vars(ends_with('ch4')), ~ str_replace(., "ch4","fch4")) 
 
-meth_concs %>% filter(is.na(Apr_ch4) == TRUE)
-#calculate excess ch4 relative to the atmosphere, based on water temperature and elevation
 df <- hydro_k %>% 
-  left_join(meth_concs, by="COMID") %>% 
-  mutate(Jan_ch4ex = Jan_ch4 - get_Ch4eq(Jan_Tw + 273.15, elev),
-         Feb_ch4ex = Feb_ch4 - get_Ch4eq(Feb_Tw + 273.15, elev),
-         Mar_ch4ex = Mar_ch4 - get_Ch4eq(Mar_Tw + 273.15, elev),
-         Apr_ch4ex = Apr_ch4 - get_Ch4eq(Apr_Tw + 273.15, elev),
-         May_ch4ex = May_ch4 - get_Ch4eq(May_Tw + 273.15, elev),
-         Jun_ch4ex = Jun_ch4 - get_Ch4eq(Jun_Tw + 273.15, elev),
-         Jul_ch4ex = Jul_ch4 - get_Ch4eq(Jul_Tw + 273.15, elev),
-         Aug_ch4ex = Aug_ch4 - get_Ch4eq(Aug_Tw + 273.15, elev),
-         Sep_ch4ex = Sep_ch4 - get_Ch4eq(Sep_Tw + 273.15, elev),
-         Oct_ch4ex = Oct_ch4 - get_Ch4eq(Oct_Tw + 273.15, elev),
-         Nov_ch4ex = Nov_ch4 - get_Ch4eq(Nov_Tw + 273.15, elev),
-         Dec_ch4ex = Dec_ch4 - get_Ch4eq(Dec_Tw + 273.15, elev))
-
-
+  left_join(meth_flux, by="COMID") 
 
 df[df$COMID == 61000003, ]$uparea <- 35
 df[df$COMID == 31000001, ]$uparea <- 35
 
-rm(hydro_k, meth_concs)
+rm(hydro_k, meth_flux)
 
 
 
@@ -183,7 +165,7 @@ wkbasins <- wkbasins %>%
   left_join( prectemp, by = 'wkbasin')
 rm(prectemp)
 
-# Extrapolation of stream orders, surface area and fluxes for the wkbasins, for each month 
+####stream order extrapolation and surface area calculation####
 for(i in 1:78){
   print(paste0('Processing the ', i, ' basin ...'))
   
@@ -196,7 +178,7 @@ for(i in 1:78){
     #join prec and temp
     df_basin_mon <- df_basin %>%
       dplyr::select(wkbasin, HYBAS_ID, strmOrder, Length, paste0(Mon, 'Width'), paste0(Mon, 'timedryout'),
-                     paste0(Mon, '_k'), paste0(Mon, '_ch4'), paste0(Mon, '_ch4ex')  ) %>% 
+                     paste0(Mon, '_k'), paste0(Mon, '_fch4')) %>% 
       left_join(wkbasins %>% 
                  select(wkbasin, paste0(Mon, '_prec'), paste0(Mon, '_tavg')),
                  by = 'wkbasin') %>% 
@@ -212,8 +194,7 @@ for(i in 1:78){
     ####use ray2013 method to predict ephemeralness
     #1
     df_basin_mon <-
-      df_basin_mon %>% 
-      mutate(
+      df_basin_mon %>% dplyr::mutate(
         percInterm_ray13 = case_when(
           strmOrder > 4 ~ 0,
           strmOrder == 4 ~ ((-0.005) * prec + 0.023 * temp + 0.27),
@@ -229,8 +210,7 @@ for(i in 1:78){
       )
     #2
     df_basin_mon <-
-      df_basin_mon %>% 
-      mutate(
+      df_basin_mon %>% dplyr::mutate(
         percInterm_ray13 = case_when(
           percInterm_ray13 > 0.9 ~ 0.9,
           percInterm_ray13 <= 0.9 & percInterm_ray13 >= 0 ~ percInterm_ray13,
@@ -244,9 +224,7 @@ for(i in 1:78){
     
     #SO summary
     SOsum <-
-      df_basin_mon %>% 
-      group_by(strmOrder) %>% 
-      summarise(
+      df_basin_mon %>% group_by(strmOrder) %>% dplyr::summarise(
         length_km = sum(Length * isChannel / 1000), #km
         width_m = mean(Width * isChannel),
         area_km2 = sum(surfArea),
@@ -254,9 +232,7 @@ for(i in 1:78){
         ephemAreaRatio = ephemArea_km2 / area_km2,
         ephemArea_km2_ray13 = sum(ephemArea_ray13),
         ephemAreaRatio_ray13 = ephemArea_km2_ray13 / area_km2,
-        k = sum(k * (surfArea - ephemArea), na.rm = TRUE) / area_km2,
-        ch4 = sum(ch4 * (surfArea - ephemArea), na.rm = TRUE) / area_km2,
-        ch4ex = sum(ch4ex * (surfArea - ephemArea), na.rm = TRUE) / area_km2
+        fch4 = sum(fch4 * (surfArea - ephemArea), na.rm = TRUE) / area_km2
       )
     
     totEphemArea_1 <- sum(SOsum$ephemArea_km2)
@@ -285,16 +261,16 @@ for(i in 1:78){
     length_extrap <- data.frame(strmOrder = SO)
     length_extrap$length_km <- exp(predict(fit, length_extrap))
     
-    #extrapolate k
-    fit <- lm(k ~ strmOrder, data = SOsum[1:wkbasins[i, ]$SOabc, ])
+    #extrapolate flux
+    fit <- lm(fch4 ~ strmOrder, data = SOsum[1:wkbasins[i, ]$SOabc, ])
     fitsum <- summary(fit)
-    r2_k <- fitsum$r.squared
-    k_extrap <- data.frame(strmOrder = SO)
+    r2_fch4 <- fitsum$r.squared
+    fch4_extrap <- data.frame(strmOrder = SO)
     if (fitsum$coefficients[2] > 0) {
-      k_extrap$k <-
-        mean(SOsum$k, na.rm = TRUE)
+      fch4_extrap$fch4 <-
+        mean(SOsum$fch4, na.rm = TRUE)
     } else{
-      k_extrap$k <- predict(fit, k_extrap)
+      fch4_extrap$fch4 <- predict(fit, fch4_extrap)
     }
     
     # find the largest non-zero SO for ephemeralness
@@ -349,11 +325,11 @@ for(i in 1:78){
       totEphemArea_2_ray13 <- NA
     }
     
-    extrap<-cbind(wkbasins[i,]$wkbasin,width_extrap,length_extrap[,2],emphemAreaRatio_extrap[,2],emphemAreaRatio_ray13_extrap[,2],k_extrap[,2])
-    names(extrap)<-c('wkbasin','strmOrder','width_m','length_km','ephemAreaRatio','ephemAreaRatio_ray13','k')
+    extrap<-cbind(wkbasins[i,]$wkbasin,width_extrap,length_extrap[,2],emphemAreaRatio_extrap[,2],emphemAreaRatio_ray13_extrap[,2],fch4_extrap[,2])
+    names(extrap)<-c('wkbasin','strmOrder','width_m','length_km','ephemAreaRatio','ephemAreaRatio_ray13','fch4')
     extrap$wkbasin <- as.character(extrap$wkbasin)
-    extrap['ch4'] <- SOsum[SOsum$strmOrder == 1, 'ch4']
-    extrap['ch4ex'] <- SOsum[SOsum$strmOrder == 1, 'ch4ex']
+   # extrap['ch4'] <- SOsum[SOsum$strmOrder == 1, 'ch4']
+    #extrap['ch4ex'] <- SOsum[SOsum$strmOrder == 1, 'ch4ex']
     extrap <- extrap %>% mutate(
       area_km2 = width_m * length_km / 1000,
       ephemArea_km2 = area_km2 * ephemAreaRatio,
@@ -365,8 +341,8 @@ for(i in 1:78){
     
     extrap <- extrap %>% 
       dplyr::mutate( effecArea_km2 = area_km2 - ephemArea_km2,
-                     ch4F = ch4ex * k * 12 * 0.365, #gC/m2/yr
-                     ch4E = ch4ex * k * effecArea_km2 * 365 * 12 / 1000000 #GgC/yr
+                     ch4F = fch4 * 12 * 0.365, #gC/m2/yr
+                     ch4E = fch4 * effecArea_km2 * 365 * 12 / 1000000#GgC/yr
                     )
     
     
@@ -381,8 +357,8 @@ for(i in 1:78){
     } else{
       k_2 = 0
     }
-    ch4_2 <- mean(extrap$ch4)
-    ch4_eq_2 <- mean(extrap$ch4ex)
+    #ch4_2 <- mean(extrap$ch4)
+    #ch4_eq_2 <- mean(extrap$ch4ex)
     ch4F_2 <-
       if (sum(extrap$effecArea_km2 != 0)) {
         sum(extrap$ch4F * extrap$effecArea_km2) / totEffectArea_2
@@ -391,20 +367,21 @@ for(i in 1:78){
       }
     ch4E_2 <- sum(extrap$ch4E)
     
-    basinMonArea <- data.frame(basinCode=wkbasins[i,]$wkbasin, Mon, endSO,r2_width,r2_length,r2_ephemArea,
-                             r2_ephemArea_ray13,r2_k,totEphemArea_1, totEphemArea_1_ray13,
+    basinMonArea<-data.frame(basinCode=wkbasins[i,]$wkbasin,Mon,
+                             endSO,r2_width,r2_length,r2_ephemArea,r2_ephemArea_ray13,r2_fch4,totEphemArea_1,
+                             totEphemArea_1_ray13,
                              totLength_2,totArea_2,totEphemArea_2,totEphemArea_2_ray13,totEffectArea_2,
-                             k_2,ch4_2,ch4_eq_2,ch4F_2,ch4E_2)
+                             ch4F_2,ch4E_2)
     
     #combining results
-    if(i==1 & Mon=='Jan'){basinArea <- basinMonArea} else {basinArea <- rbind(basinArea,basinMonArea)}
+    if(i==1 & Mon=='Jan'){basinArea<-basinMonArea} else {basinArea<-rbind(basinArea,basinMonArea)}
   }
 }
 
 rm(basinMonArea, df_basin,df_basin_mon,emphemAreaRatio_extrap,emphemAreaRatio_ray13_extrap,extrap,fit,fitsum,k_extrap,length_extrap,
-   SOsum,width_extrap,endSO,endSOi,i,intercept,k_2,Mon,totEphemArea_1_ray13,
-   r2_ephemArea,r2_ephemArea_ray13,r2_k,r2_length,r2_width,slope,SO,SOabc_e,totArea_2,totEphemArea_1,
-   totEffectArea_2, totEphemArea_2,totEphemArea_2_ray13,totLength_2)
+   SOsum,width_extrap,co2_2,co2E_2,co2NM,dryoutNM,endSO,endSOi,i,intercept,kNM,Mon,precNM,totEphemArea_1_ray13,
+   r2_ephemArea,r2_ephemArea_ray13,r2_fch4,r2_length,r2_width,slope,SO,SOabc_e,tempNM,totArea_2,totEphemArea_1,
+   totEffectArea_2, totEphemArea_2,totEphemArea_2_ray13,totLength_2,widthNM)
 # write_csv(basinArea,paste0(wd,'/output/table/regionSurfArea/basinArea.csv'))
 
 
@@ -433,7 +410,8 @@ if (sum(df_2$rt > 2)) {
   df_2[df_2$rt > 2,]$rt = 2
 }
 
-
+# rtm<-median(df_2[df_2$rt<3,]$rt,na.rm=TRUE) #ratio(rt) too high (e.g.>3) is because misalignment.
+# if(is.na(rtm)){rtm=1}
 df_2 <- df_2 %>% 
   mutate(
     JanWidth = JanWidth * rt,
@@ -451,7 +429,8 @@ df_2 <- df_2 %>%
   select(-yeaWidth) %>% 
   rename( yeaWidth =width_mean)
 
-
+#df_2 <- df_2[, !names(df_2) %in% c('yeaWidth')]
+#names(df_2)[names(df_2) %in% c('width_mean')] <- 'yeaWidth'
 
 df_2 <- df_2[, names(df_1)]
 
@@ -465,24 +444,22 @@ rm(df_1, df_2)
 gc()
 
 ####join hydroBAS atts####
-df<-df[!(df$HYBAS_ID %in% c("1040040050","2040059370","5040055420")),] #basins have no valid rivArea
+df<-df[!(df$HYBAS_ID%in%c("1040040050","2040059370","5040055420")),]#basins have no valid rivArea
 df<-df[!is.na(df$Apr_k),]
 
 #linking wkbasin to HydroSHEDS04 basins
-hydroBAS <- df %>% 
+hydroBAS<-df %>% 
   group_by(HYBAS_ID) %>% 
-  summarise(wkbasin=first(wkbasin)) %>% 
+  dplyr::summarise(wkbasin=first(wkbasin)) %>% 
   mutate(HYBAS_ID=as.character(HYBAS_ID)) %>% 
   rename(basinCode = wkbasin)
 
 # write.csv(hydroBAS,paste0(wd,'/output/table/flowregime/hydroBAS.csv'))
 #join basinCentroid
-
 basinCentroid<-read_csv('data/raw/gis/upscaling_vars/hydrobasin4_centroid.csv',
                         col_types=cols(.default='d',HYBAS_ID='c'))
 
-hydroBAS <- left_join(hydroBAS,basinCentroid,by='HYBAS_ID')
-
+hydroBAS<-left_join(hydroBAS,basinCentroid,by='HYBAS_ID')
 #give climate zones
 hydroBAS <- hydroBAS %>%
   mutate(
@@ -513,126 +490,57 @@ rm(WKbasinArea)
 
 #join prectemp
 prectemp <- read_csv('data/raw/gis/upscaling_vars/tempPrep.csv', col_types = cols(.default='d',HYBAS_ID='c')) %>% 
-  select(HYBAS_ID, annTemp, annPrec ) #degree celsius, mm/yr
+  select(HYBAS_ID, annTemp, annPrec ) #degree celcius, mm/yr
 
 hydroBAS <- left_join(hydroBAS, prectemp, by='HYBAS_ID')
 rm(prectemp)
 
 #join runoff
 runoff <- read_csv('data/raw/gis/upscaling_vars/runoffhydrobasin4.csv', col_types=cols(.default='d',HYBAS_ID='c')) %>% 
-  mutate( wetness=case_when(runoff < 50 ~ 'Arid',
-                    runoff >= 50 & runoff < 500 ~ 'Mod',
-                    runoff >= 500 ~ 'Wet') )
+  mutate( wetness=case_when(runoff<50~'Arid',
+                    runoff>=50&runoff<500~'Mod',
+                    runoff>=500~'Wet') )
 
 hydroBAS<-left_join(hydroBAS,runoff,by='HYBAS_ID')
 rm(runoff)
 
 ####join part1####
-#join ch4_1
-ch4_1<- df %>% 
-  group_by(HYBAS_ID)%>%
-  dplyr::summarise(ch4_Jan=sum(Jan_ch4*Length*JanWidth/1000000*(1-Jantimedryout)*(JanWidth>=0.3))/
-                     sum(Length*JanWidth/1000000*(1-Jantimedryout)*(JanWidth>=0.3)),
-                   ch4_Feb=sum(Feb_ch4*Length*FebWidth/1000000*(1-Febtimedryout)*(FebWidth>=0.3))/
-                     sum(Length*FebWidth/1000000*(1-Febtimedryout)*(FebWidth>=0.3)),
-                   ch4_Mar=sum(Mar_ch4*Length*MarWidth/1000000*(1-Martimedryout)*(MarWidth>=0.3))/
-                     sum(Length*MarWidth/1000000*(1-Martimedryout)*(MarWidth>=0.3)),
-                   ch4_Apr=sum(Apr_ch4*Length*AprWidth/1000000*(1-Aprtimedryout)*(AprWidth>=0.3))/
-                     sum(Length*AprWidth/1000000*(1-Aprtimedryout)*(AprWidth>=0.3)),
-                   ch4_May=sum(May_ch4*Length*MayWidth/1000000*(1-Maytimedryout)*(MayWidth>=0.3))/
-                     sum(Length*MayWidth/1000000*(1-Maytimedryout)*(MayWidth>=0.3)),
-                   ch4_Jun=sum(Jun_ch4*Length*JunWidth/1000000*(1-Juntimedryout)*(JunWidth>=0.3))/
-                     sum(Length*JunWidth/1000000*(1-Juntimedryout)*(JunWidth>=0.3)),
-                   ch4_Jul=sum(Jul_ch4*Length*JulWidth/1000000*(1-Jultimedryout)*(JulWidth>=0.3))/
-                     sum(Length*JulWidth/1000000*(1-Jultimedryout)*(JulWidth>=0.3)),
-                   ch4_Aug=sum(Aug_ch4*Length*AugWidth/1000000*(1-Augtimedryout)*(AugWidth>=0.3))/
-                     sum(Length*AugWidth/1000000*(1-Augtimedryout)*(AugWidth>=0.3)),
-                   ch4_Sep=sum(Sep_ch4*Length*SepWidth/1000000*(1-Septimedryout)*(SepWidth>=0.3))/
-                     sum(Length*SepWidth/1000000*(1-Septimedryout)*(SepWidth>=0.3)),
-                   ch4_Oct=sum(Oct_ch4*Length*OctWidth/1000000*(1-Octtimedryout)*(OctWidth>=0.3))/
-                     sum(Length*OctWidth/1000000*(1-Octtimedryout)*(OctWidth>=0.3)),
-                   ch4_Nov=sum(Nov_ch4*Length*NovWidth/1000000*(1-Novtimedryout)*(NovWidth>=0.3))/
-                     sum(Length*NovWidth/1000000*(1-Novtimedryout)*(NovWidth>=0.3)),
-                   ch4_Dec=sum(Dec_ch4*Length*DecWidth/1000000*(1-Dectimedryout)*(DecWidth>=0.3))/
-                     sum(Length*DecWidth/1000000*(1-Dectimedryout)*(DecWidth>=0.3))) %>% 
-  mutate(HYBAS_ID = as.character(HYBAS_ID))
-
-hydroBAS_res1 <- left_join(hydroBAS,ch4_1,by='HYBAS_ID')
-
-rm(ch4_1)
-gc()
-
-#k_1
-k_1<-
-  df %>% 
-  group_by(HYBAS_ID) %>%
-  dplyr::summarise(k_Jan=sum(Jan_k*Length*JanWidth/1000000*(1-Jantimedryout)*(JanWidth>=0.3))/
-                     sum(Length*JanWidth/1000000*(1-Jantimedryout)*(JanWidth>=0.3)),
-                   k_Feb=sum(Feb_k*Length*FebWidth/1000000*(1-Febtimedryout)*(FebWidth>=0.3))/
-                     sum(Length*FebWidth/1000000*(1-Febtimedryout)*(FebWidth>=0.3)),
-                   k_Mar=sum(Mar_k*Length*MarWidth/1000000*(1-Martimedryout)*(MarWidth>=0.3))/
-                     sum(Length*MarWidth/1000000*(1-Martimedryout)*(MarWidth>=0.3)),
-                   k_Apr=sum(Apr_k*Length*AprWidth/1000000*(1-Aprtimedryout)*(AprWidth>=0.3))/
-                     sum(Length*AprWidth/1000000*(1-Aprtimedryout)*(AprWidth>=0.3)),
-                   k_May=sum(May_k*Length*MayWidth/1000000*(1-Maytimedryout)*(MayWidth>=0.3))/
-                     sum(Length*MayWidth/1000000*(1-Maytimedryout)*(MayWidth>=0.3)),
-                   k_Jun=sum(Jun_k*Length*JunWidth/1000000*(1-Juntimedryout)*(JunWidth>=0.3))/
-                     sum(Length*JunWidth/1000000*(1-Juntimedryout)*(JunWidth>=0.3)),
-                   k_Jul=sum(Jul_k*Length*JulWidth/1000000*(1-Jultimedryout)*(JulWidth>=0.3))/
-                     sum(Length*JulWidth/1000000*(1-Jultimedryout)*(JulWidth>=0.3)),
-                   k_Aug=sum(Aug_k*Length*AugWidth/1000000*(1-Augtimedryout)*(AugWidth>=0.3))/
-                     sum(Length*AugWidth/1000000*(1-Augtimedryout)*(AugWidth>=0.3)),
-                   k_Sep=sum(Sep_k*Length*SepWidth/1000000*(1-Septimedryout)*(SepWidth>=0.3))/
-                     sum(Length*SepWidth/1000000*(1-Septimedryout)*(SepWidth>=0.3)),
-                   k_Oct=sum(Oct_k*Length*OctWidth/1000000*(1-Octtimedryout)*(OctWidth>=0.3))/
-                     sum(Length*OctWidth/1000000*(1-Octtimedryout)*(OctWidth>=0.3)),
-                   k_Nov=sum(Nov_k*Length*NovWidth/1000000*(1-Novtimedryout)*(NovWidth>=0.3))/
-                     sum(Length*NovWidth/1000000*(1-Novtimedryout)*(NovWidth>=0.3)),
-                   k_Dec=sum(Dec_k*Length*DecWidth/1000000*(1-Dectimedryout)*(DecWidth>=0.3))/
-                     sum(Length*DecWidth/1000000*(1-Dectimedryout)*(DecWidth>=0.3))) %>% 
-  mutate(HYBAS_ID = as.character(HYBAS_ID))
-
-hydroBAS_res1<-left_join(hydroBAS_res1,k_1,by='HYBAS_ID')
-
-rm(k_1)
-
 
 #ch4F_1
-ch4F_1<- df %>% 
-  group_by(HYBAS_ID)%>%
-  dplyr::summarise(ch4F_Jan=sum(Jan_ch4ex*Jan_k*365*12/1000*Length*JanWidth/1000000*(1-Jantimedryout)*(JanWidth>=0.3))/
+ch4F_1<- df %>% group_by(HYBAS_ID)%>%
+  dplyr::summarise(ch4F_Jan=sum(Jan_fch4*365*12/1000*Length*JanWidth/1000000*(1-Jantimedryout)*(JanWidth>=0.3))/
                      sum(Length*JanWidth/1000000*(1-Jantimedryout)*(JanWidth>=0.3)),
-                   ch4F_Feb=sum(Feb_ch4ex*Feb_k*365*12/1000*Length*FebWidth/1000000*(1-Febtimedryout)*(FebWidth>=0.3))/
+                   ch4F_Feb=sum(Feb_fch4*365*12/1000*Length*FebWidth/1000000*(1-Febtimedryout)*(FebWidth>=0.3))/
                      sum(Length*FebWidth/1000000*(1-Febtimedryout)*(FebWidth>=0.3)),
-                   ch4F_Mar=sum(Mar_ch4ex*Mar_k*365*12/1000*Length*MarWidth/1000000*(1-Martimedryout)*(MarWidth>=0.3))/
+                   ch4F_Mar=sum(Mar_fch4*365*12/1000*Length*MarWidth/1000000*(1-Martimedryout)*(MarWidth>=0.3))/
                      sum(Length*MarWidth/1000000*(1-Martimedryout)*(MarWidth>=0.3)),
-                   ch4F_Apr=sum(Apr_ch4ex*Apr_k*365*12/1000*Length*AprWidth/1000000*(1-Aprtimedryout)*(AprWidth>=0.3))/
+                   ch4F_Apr=sum(Apr_fch4*365*12/1000*Length*AprWidth/1000000*(1-Aprtimedryout)*(AprWidth>=0.3))/
                      sum(Length*AprWidth/1000000*(1-Aprtimedryout)*(AprWidth>=0.3)),
-                   ch4F_May=sum(May_ch4ex*May_k*365*12/1000*Length*MayWidth/1000000*(1-Maytimedryout)*(MayWidth>=0.3))/
+                   ch4F_May=sum(May_fch4*365*12/1000*Length*MayWidth/1000000*(1-Maytimedryout)*(MayWidth>=0.3))/
                      sum(Length*MayWidth/1000000*(1-Maytimedryout)*(MayWidth>=0.3)),
-                   ch4F_Jun=sum(Jun_ch4ex*Jun_k*365*12/1000*Length*JunWidth/1000000*(1-Juntimedryout)*(JunWidth>=0.3))/
+                   ch4F_Jun=sum(Jun_fch4*365*12/1000*Length*JunWidth/1000000*(1-Juntimedryout)*(JunWidth>=0.3))/
                      sum(Length*JunWidth/1000000*(1-Juntimedryout)*(JunWidth>=0.3)),
-                   ch4F_Jul=sum(Jul_ch4ex*Jul_k*365*12/1000*Length*JulWidth/1000000*(1-Jultimedryout)*(JulWidth>=0.3))/
+                   ch4F_Jul=sum(Jul_fch4*365*12/1000*Length*JulWidth/1000000*(1-Jultimedryout)*(JulWidth>=0.3))/
                      sum(Length*JulWidth/1000000*(1-Jultimedryout)*(JulWidth>=0.3)),
-                   ch4F_Aug=sum(Aug_ch4ex*Aug_k*365*12/1000*Length*AugWidth/1000000*(1-Augtimedryout)*(AugWidth>=0.3))/
+                   ch4F_Aug=sum(Aug_fch4*365*12/1000*Length*AugWidth/1000000*(1-Augtimedryout)*(AugWidth>=0.3))/
                      sum(Length*AugWidth/1000000*(1-Augtimedryout)*(AugWidth>=0.3)),
-                   ch4F_Sep=sum(Sep_ch4ex*Sep_k*365*12/1000*Length*SepWidth/1000000*(1-Septimedryout)*(SepWidth>=0.3))/
+                   ch4F_Sep=sum(Sep_fch4*365*12/1000*Length*SepWidth/1000000*(1-Septimedryout)*(SepWidth>=0.3))/
                      sum(Length*SepWidth/1000000*(1-Septimedryout)*(SepWidth>=0.3)),
-                   ch4F_Oct=sum(Oct_ch4ex*Oct_k*365*12/1000*Length*OctWidth/1000000*(1-Octtimedryout)*(OctWidth>=0.3))/
+                   ch4F_Oct=sum(Oct_fch4*365*12/1000*Length*OctWidth/1000000*(1-Octtimedryout)*(OctWidth>=0.3))/
                      sum(Length*OctWidth/1000000*(1-Octtimedryout)*(OctWidth>=0.3)),
-                   ch4F_Nov=sum(Nov_ch4ex*Nov_k*365*12/1000*Length*NovWidth/1000000*(1-Novtimedryout)*(NovWidth>=0.3))/
+                   ch4F_Nov=sum(Nov_fch4*365*12/1000*Length*NovWidth/1000000*(1-Novtimedryout)*(NovWidth>=0.3))/
                      sum(Length*NovWidth/1000000*(1-Novtimedryout)*(NovWidth>=0.3)),
-                   ch4F_Dec=sum(Dec_ch4ex*Dec_k*365*12/1000*Length*DecWidth/1000000*(1-Dectimedryout)*(DecWidth>=0.3))/
+                   ch4F_Dec=sum(Dec_fch4*365*12/1000*Length*DecWidth/1000000*(1-Dectimedryout)*(DecWidth>=0.3))/
                      sum(Length*DecWidth/1000000*(1-Dectimedryout)*(DecWidth>=0.3))) %>% 
   mutate(HYBAS_ID = as.character(HYBAS_ID))
 
-hydroBAS_res1<-left_join(hydroBAS_res1,ch4F_1,by='HYBAS_ID') 
+hydroBAS_res1<-left_join(hydroBAS,ch4F_1,by='HYBAS_ID')
 rm(ch4F_1)
 
 
 #join totArea_1
-totArea_1 <- df %>% 
-  group_by(HYBAS_ID) %>%
+totArea_1<-
+  df%>%group_by(HYBAS_ID)%>%
   dplyr::summarise(rivArea_Jan=sum(Length*JanWidth/1000000*(JanWidth>=0.3)),
                    rivArea_Feb=sum(Length*FebWidth/1000000*(FebWidth>=0.3)),
                    rivArea_Mar=sum(Length*MarWidth/1000000*(MarWidth>=0.3)),
@@ -652,8 +560,8 @@ rm(totArea_1)
 
 
 #Join ephemArea_1
-ephemArea_1 <- df %>% 
-  group_by(HYBAS_ID) %>%
+ephemArea_1<-
+  df%>%group_by(HYBAS_ID)%>%
   dplyr::summarise(ephemArea_Jan=sum(Length*JanWidth/1000000*(Jantimedryout)*(JanWidth>=0.3)),
                    ephemArea_Feb=sum(Length*FebWidth/1000000*(Febtimedryout)*(FebWidth>=0.3)),
                    ephemArea_Mar=sum(Length*MarWidth/1000000*(Martimedryout)*(MarWidth>=0.3)),
@@ -668,13 +576,13 @@ ephemArea_1 <- df %>%
                    ephemArea_Dec=sum(Length*DecWidth/1000000*(Dectimedryout)*(DecWidth>=0.3))) %>% 
   mutate(HYBAS_ID = as.character(HYBAS_ID))
 
-hydroBAS_res1 <- left_join(hydroBAS_res1, ephemArea_1, by='HYBAS_ID')
+hydroBAS_res1<-left_join(hydroBAS_res1,ephemArea_1,by='HYBAS_ID')
 rm(ephemArea_1)
 
 
 #EffectArea_1
-effectArea_1<- df %>%
-  group_by(HYBAS_ID) %>%
+effectArea_1<-
+  df%>%group_by(HYBAS_ID)%>%
   dplyr::summarise(effectArea_Jan=sum(Length*JanWidth/1000000*(1-Jantimedryout)*(JanWidth>=0.3)),
                    effectArea_Feb=sum(Length*FebWidth/1000000*(1-Febtimedryout)*(FebWidth>=0.3)),
                    effectArea_Mar=sum(Length*MarWidth/1000000*(1-Martimedryout)*(MarWidth>=0.3)),
@@ -690,11 +598,11 @@ effectArea_1<- df %>%
   mutate(HYBAS_ID = as.character(HYBAS_ID))
 
 #get ice coverage
-icecov <- read_csv('data/raw/gis/upscaling_vars/iceout.csv', col_types=cols(.default='d',HYBAS_ID='c'))
+icecov<-read_csv('data/raw/gis/upscaling_vars/iceout.csv', col_types=cols(.default='d',HYBAS_ID='c'))
 
-names(icecov) <- c('HYBAS_ID',paste0('iceCov_',month.abb))
+names(icecov)<-c('HYBAS_ID',paste0('iceCov_',month.abb))
 
-effectArea_1 <- left_join(effectArea_1,icecov,by='HYBAS_ID')
+effectArea_1<-left_join(effectArea_1,icecov,by='HYBAS_ID')
 
 #calculate iceCovered area
 effectArea_1 <- effectArea_1 %>% 
@@ -734,20 +642,20 @@ rm(effectArea_1)
 
 
 #join ch4E_1,unit: 10^9gCyr-1
-ch4E_1 <- df %>%
-  group_by(HYBAS_ID) %>%
-  dplyr::summarise(ch4E_Jan=sum(Jan_ch4ex*Jan_k*365*12/1000*Length*JanWidth/1000000000*(1-Jantimedryout)*(JanWidth>=0.3)),
-                   ch4E_Feb=sum(Feb_ch4ex*Feb_k*365*12/1000*Length*FebWidth/1000000000*(1-Febtimedryout)*(FebWidth>=0.3)),
-                   ch4E_Mar=sum(Mar_ch4ex*Mar_k*365*12/1000*Length*MarWidth/1000000000*(1-Martimedryout)*(MarWidth>=0.3)),
-                   ch4E_Apr=sum(Apr_ch4ex*Apr_k*365*12/1000*Length*AprWidth/1000000000*(1-Aprtimedryout)*(AprWidth>=0.3)),
-                   ch4E_May=sum(May_ch4ex*May_k*365*12/1000*Length*MayWidth/1000000000*(1-Maytimedryout)*(MayWidth>=0.3)),
-                   ch4E_Jun=sum(Jun_ch4ex*Jun_k*365*12/1000*Length*JunWidth/1000000000*(1-Juntimedryout)*(JunWidth>=0.3)),
-                   ch4E_Jul=sum(Jul_ch4ex*Jul_k*365*12/1000*Length*JulWidth/1000000000*(1-Jultimedryout)*(JulWidth>=0.3)),
-                   ch4E_Aug=sum(Aug_ch4ex*Aug_k*365*12/1000*Length*AugWidth/1000000000*(1-Augtimedryout)*(AugWidth>=0.3)),
-                   ch4E_Sep=sum(Sep_ch4ex*Sep_k*365*12/1000*Length*SepWidth/1000000000*(1-Septimedryout)*(SepWidth>=0.3)),
-                   ch4E_Oct=sum(Oct_ch4ex*Oct_k*365*12/1000*Length*OctWidth/1000000000*(1-Octtimedryout)*(OctWidth>=0.3)),
-                   ch4E_Nov=sum(Nov_ch4ex*Nov_k*365*12/1000*Length*NovWidth/1000000000*(1-Novtimedryout)*(NovWidth>=0.3)),
-                   ch4E_Dec=sum(Dec_ch4ex*Dec_k*365*12/1000*Length*DecWidth/1000000000*(1-Dectimedryout)*(DecWidth>=0.3))) %>% 
+ch4E_1<-
+  df%>%group_by(HYBAS_ID)%>%
+  dplyr::summarise(ch4E_Jan=sum(Jan_fch4*365*12/1000*Length*JanWidth/1000000000*(1-Jantimedryout)*(JanWidth>=0.3)),
+                   ch4E_Feb=sum(Feb_fch4*365*12/1000*Length*FebWidth/1000000000*(1-Febtimedryout)*(FebWidth>=0.3)),
+                   ch4E_Mar=sum(Mar_fch4*365*12/1000*Length*MarWidth/1000000000*(1-Martimedryout)*(MarWidth>=0.3)),
+                   ch4E_Apr=sum(Apr_fch4*365*12/1000*Length*AprWidth/1000000000*(1-Aprtimedryout)*(AprWidth>=0.3)),
+                   ch4E_May=sum(May_fch4*365*12/1000*Length*MayWidth/1000000000*(1-Maytimedryout)*(MayWidth>=0.3)),
+                   ch4E_Jun=sum(Jun_fch4*365*12/1000*Length*JunWidth/1000000000*(1-Juntimedryout)*(JunWidth>=0.3)),
+                   ch4E_Jul=sum(Jul_fch4*365*12/1000*Length*JulWidth/1000000000*(1-Jultimedryout)*(JulWidth>=0.3)),
+                   ch4E_Aug=sum(Aug_fch4*365*12/1000*Length*AugWidth/1000000000*(1-Augtimedryout)*(AugWidth>=0.3)),
+                   ch4E_Sep=sum(Sep_fch4*365*12/1000*Length*SepWidth/1000000000*(1-Septimedryout)*(SepWidth>=0.3)),
+                   ch4E_Oct=sum(Oct_fch4*365*12/1000*Length*OctWidth/1000000000*(1-Octtimedryout)*(OctWidth>=0.3)),
+                   ch4E_Nov=sum(Nov_fch4*365*12/1000*Length*NovWidth/1000000000*(1-Novtimedryout)*(NovWidth>=0.3)),
+                   ch4E_Dec=sum(Dec_fch4*365*12/1000*Length*DecWidth/1000000000*(1-Dectimedryout)*(DecWidth>=0.3))) %>% 
   mutate(HYBAS_ID = as.character(HYBAS_ID))
 
 #correct for ice cover
@@ -768,15 +676,13 @@ ch4E_1 <- ch4E_1 %>%
   ch4E_Dec=ch4E_Dec*(1-iceCov_Dec)
 )
 
-hydroBAS_res1 <- left_join(hydroBAS_res1,ch4E_1[,1:13],by='HYBAS_ID')
+hydroBAS_res1<-left_join(hydroBAS_res1,ch4E_1[,1:13],by='HYBAS_ID')
 rm(ch4E_1)
 
 
 ####join part2####
 #join res2
 cols = c(
-  'ch4_2',
-  'k_2',
   'ch4F_2',
   'totArea_2',
   'totEphemArea_2',
@@ -798,7 +704,7 @@ names(hydroBAS_res2) <- str_replace(names(hydroBAS_res2), "_2", "")
 names(hydroBAS_res2) <- str_replace(names(hydroBAS_res2), "totE", "e")
 
 
-#using areaRatio to partition rivArea,ephemArea,icecovArea,and ch4E
+#using areaRatio to partition rivArea,ephemArea,icecovArea,and co2E
 for (Mon in month.abb) {
   hydroBAS_res2[, paste0('rivArea_', Mon)] <-
     hydroBAS_res2$areaRatio * hydroBAS_res2[, paste0('rivArea_', Mon)]
@@ -815,11 +721,11 @@ for (Mon in month.abb) {
   hydroBAS_res2[, paste0('ch4E_', Mon)] <-
     hydroBAS_res2$areaRatio * hydroBAS_res2[, paste0('ch4E_', Mon)]
 }
-#correcting for ice covered area and ch4E for part 2
+#correcting for ice covered area and co2E for part 2
 hydroBAS_res2 <- left_join(hydroBAS_res2, icecov, by = 'HYBAS_ID')
 #calculate iceCovered area
-hydroBAS_res2 <- hydroBAS_res2 %>% 
-  mutate(
+hydroBAS_res2<-
+  hydroBAS_res2%>%dplyr::mutate(
     icecovArea_Jan = effectArea_Jan * iceCov_Jan,
     icecovArea_Feb = effectArea_Feb * iceCov_Feb,
     icecovArea_Mar = effectArea_Mar * iceCov_Mar,
@@ -882,19 +788,8 @@ for (Mon in month.abb) {
     hydroBAS_res1[, paste0('ch4E_', Mon)] + hydroBAS_res2[, paste0('ch4E_', Mon)]
 }
 
-#for ch4,k and ch4F, it weighted avgs
-for (Mon in month.abb) {
-  hydroBAS[, paste0('ch4_', Mon)] <-
-    (hydroBAS_res1[, paste0('effectArea_', Mon)] * hydroBAS_res1[, paste0('ch4_', Mon)] +
-       hydroBAS_res2[, paste0('effectArea_', Mon)] *
-       hydroBAS_res2[, paste0('ch4_', Mon)]) / hydroBAS[, paste0('effectArea_', Mon)]
-}
-for (Mon in month.abb) {
-  hydroBAS[, paste0('k_', Mon)] <-
-    (hydroBAS_res1[, paste0('effectArea_', Mon)] * hydroBAS_res1[, paste0('k_', Mon)] +
-       hydroBAS_res2[, paste0('effectArea_', Mon)] * hydroBAS_res2[, paste0('k_', Mon)]) /
-    hydroBAS[, paste0('effectArea_', Mon)]
-}
+#for pco2,k and co2F, it weighted avgs
+
 for (Mon in month.abb) {
   hydroBAS[, paste0('ch4F_', Mon)] <-
     (hydroBAS_res1[, paste0('effectArea_', Mon)] * hydroBAS_res1[, paste0('ch4F_', Mon)] +
@@ -903,16 +798,13 @@ for (Mon in month.abb) {
 }
 #correcting for basins where there is no effective area
 for (Mon in month.abb) {
-  hydroBAS[hydroBAS[, paste0('effectArea_', Mon)] == 0, paste0('ch4_', Mon)] <- 0
-  hydroBAS[hydroBAS[, paste0('effectArea_', Mon)] == 0, paste0('k_', Mon)] <- 0
   hydroBAS[hydroBAS[, paste0('effectArea_', Mon)] == 0, paste0('ch4F_', Mon)] <- 0
 }
-
+# rm(hydroBAS_res1,hydroBAS_res2,icecov,basinArea_h,GRWLwidth)
 gc()
 
 #total flux
 hydroBAS %>% 
-  filter(is.na(ch4E_Apr) == FALSE) %>% 
   summarise(across(ch4E_Jan:ch4E_Dec, sum)) %>% 
   pivot_longer( everything(), names_to = "month", values_to = "flux") %>% 
   mutate(per_day=flux/365,
@@ -920,11 +812,11 @@ hydroBAS %>%
   summarise(sum=sum(per_day*n_days)) *16/12/1000 #in TgCH4
 
 
-write_csv(hydroBAS, 'data/processed/ch4E_hybas.csv')
+write_csv(hydroBAS, 'data/processed/ch4Eflux_hybas.csv')
 
 df %>% 
   dplyr::select(-ends_with(c("Ta", "dryout"))) %>% 
-  write_csv( "data/processed/grades_ch4_k_q.csv")
+  write_csv( "data/processed/grades_ch4F_k_q.csv")
 
 
 #upload to drive
@@ -937,16 +829,7 @@ drive_upload(media = "data/processed/grades_ch4_k_q.csv",
              overwrite = TRUE)
 
 
-median(df$Length)
 
-colnames(df)
 
-#TABLE SM
-df %>% 
-  group_by(strmOrder) %>% 
-  summarise(n=n(),
-            width=median(yeaWidth),
-            length= median(Length),
-            slope = mean(Slope)) %>% 
-  arrange(strmOrder)
+
 

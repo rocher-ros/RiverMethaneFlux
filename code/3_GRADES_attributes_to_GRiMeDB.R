@@ -89,10 +89,12 @@ colnames(gwTable)
 gwTable %>% 
   summarise(across(everything(), ~sum(is.na(.x))))
 
-k <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "k", full.names = TRUE), read_csv) %>% 
-  bind_rows()
+q_k <- read_csv("data/processed/q_and_k.csv") %>% 
+  dplyr::select(COMID, ends_with("Qmean"), ends_with("k"), -yeaQmean) #lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "k", full.names = TRUE), read_csv) %>% 
+  #bind_rows()
 
-colnames(k) <- c("COMID", "k_jan", "k_feb", "k_mar", "k_apr", "k_may", "k_jun", "k_jul", "k_aug", "k_sep", "k_oct", "k_nov", "k_dec")
+colnames(q_k) <- c("COMID", "q_jan", "q_feb", "q_mar", "q_apr", "q_may", "q_jun", "q_jul", "q_aug", "q_sep", "q_oct", "q_nov", "q_dec",
+                 "k_jan", "k_feb", "k_mar", "k_apr", "k_may", "k_jun", "k_jul", "k_aug", "k_sep", "k_oct", "k_nov", "k_dec")
 
 monPP <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "monPP", full.names = TRUE), read_csv) %>% 
   bind_rows()
@@ -149,9 +151,21 @@ nutrients_water <- read_csv("data/raw/gis/GRADES_attributes/nutrients_water.csv"
   dplyr::select(-P_retention_subgrid)
 colnames(nutrients_water)
 
+footprint <- lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "human_footprint", full.names = TRUE), read_csv) %>% 
+  bind_rows() %>% 
+  mutate(across(everything(), ~replace_na(.x, 0)))
+
+
+fertilizers <- read_csv("data/raw/gis/GRADES_attributes/fertilizers.csv")
+colnames(fertilizers)
+
+mountains <- read_csv("data/raw/gis/GRADES_attributes/mountains.csv")
+colnames(mountains)
+
+
 #read coordinates from grades
 grades_latlon <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
-  dplyr::select(COMID, lat, lon)
+  dplyr::select(COMID, lat, lon, slope)
 
 nutrients_water %>% 
   summarise(across(everything(), ~sum(is.na(.x)))) %>% 
@@ -187,7 +201,7 @@ conc_df_comids <- conc_df %>%
 
 ## attach  COMID to the flux df and keep useful variables
 flux_df %>% 
-  drop_na(Diffusive_CH4_Flux_Median) %>% 
+  drop_na(Diffusive_CH4_Flux_Mean) %>% 
   select(Site_Nid,Date_start,  Diffusive_CH4_Flux_Median, Diffusive_CH4_Flux_Mean ) %>% 
   print(n=100)
 
@@ -202,6 +216,7 @@ flux_df_comids <- flux_df %>%
 
 # Gw has some gaps, fix it
 grades_gw_sf <- grades_latlon %>% 
+  dplyr::select(-slope) %>% 
   left_join(gwTable, by="COMID") %>% 
   st_as_sf( coords = c("lon", "lat"),  crs = 4326) 
 
@@ -232,7 +247,7 @@ grades_attributes <-  annPP %>%
   left_join(grades_latlon, by="COMID") %>%  
   left_join(eleSlope, by="COMID") %>% 
   left_join(gw_good, by="COMID") %>% 
-  left_join(k, by="COMID") %>% 
+  left_join(q_k, by="COMID") %>% 
   left_join(monPP, by="COMID") %>% 
   left_join(monTemp, by="COMID") %>% 
   left_join(popdens, by="COMID") %>%
@@ -243,21 +258,24 @@ grades_attributes <-  annPP %>%
   left_join(wetland, by ="COMID") %>% 
   left_join(land, by ="COMID") %>% 
   left_join(nutrients_water, by ="COMID") %>% 
-  mutate(across(everything(), ~na_if(., -Inf))) %>% 
-  mutate(across(everything(), ~na_if(., Inf))) %>% 
-  drop_na(elev) 
+  left_join(footprint, by ="COMID") %>% 
+  left_join(fertilizers, by ="COMID") %>% 
+  left_join(mountains, by ="COMID") %>% 
+  drop_na(q_jan) %>% 
+  distinct(COMID, .keep_all = TRUE)
+
+colnames(grades_attributes)
 
 grades_attributes %>% 
   summarise(across(everything(), ~sum(is.na(.x)))) %>% 
   pivot_longer(everything(), names_to = "name", values_to = "n_na") %>% 
-  arrange(desc(n_na)) %>% print(n=200)
+  arrange(desc(n_na)) %>% print(n=10)
 
 grades_attributes %>%
-  filter(duplicated(.[["COMID"]]))
+  filter(duplicated(.[["COMID"]])) %>% 
+  arrange(COMID)  %>% print(n=100)
          
-
-
-rm(annPP, eleSlope, gwTable, k, land, monPP, monTemp, popdens, prectemp, soilATT, sresp, 
+rm(annPP, eleSlope, gwTable, q_k, land, monPP, monTemp, popdens, prectemp, soilATT, sresp, 
    uparea, wetland, gw_good)
 
 gc()
@@ -306,6 +324,18 @@ grimeDB_attributes_mon <- grimeDB_attributes %>%
                                month(date) == 10 ~ k_oct,
                                month(date) == 11 ~ k_nov,
                                month(date) == 12 ~ k_dec),
+          q_month =  case_when(month(date) == 1 ~  q_jan,
+                               month(date) == 2 ~  q_feb,
+                               month(date) == 3 ~  q_mar,
+                               month(date) == 4 ~  q_apr,
+                               month(date) == 5 ~  q_may,
+                               month(date) == 6 ~  q_jun,
+                               month(date) == 7 ~  q_jul,
+                               month(date) == 8 ~  q_aug,
+                               month(date) == 9 ~  q_sep,
+                               month(date) == 10 ~ q_oct,
+                               month(date) == 11 ~ q_nov,
+                               month(date) == 12 ~ q_dec),
           gpp_month = case_when(month(date) == 1 ~ gpp_jan,
                                month(date) == 2 ~ gpp_feb,
                                month(date) == 3 ~ gpp_mar,

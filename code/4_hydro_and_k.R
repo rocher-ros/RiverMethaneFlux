@@ -34,6 +34,8 @@ hydroBasinID <-
 
 hydroBasinID <- hydroBasinID[!(hydroBasinID$HYBAS_ID %in% c('0')), ]
 
+hydroBasinID_nobasin %>% filter(HYBAS_ID == "0")
+
 hydroBasinID_nobasin <-
   read_csv("data/raw/gis/upscaling_vars/comidHydrobasin4_noBasin.csv",
            col_types = 'ic')
@@ -187,11 +189,22 @@ k <- vel %>%
     dplyr::select(COMID, Slope, ends_with(c("V", "Sc", "eD"), ignore.case = FALSE),
                   -starts_with("yea")) %>% 
     pivot_longer(-c(COMID, Slope), names_to = c("month", ".value"), names_sep = "_") %>% 
-    mutate(k = case_when(Slope <= 0.01 | eD <= 0.02 ~ (2841 * Slope * V) / (600/Sc)^0.5,
-                         eD > 0.02 ~  exp(1.18*log(eD)+6.43)*(600/Sc)^0.5) ) %>%
+    mutate(k = case_when(Slope <= 0.01 | eD <= 0.02 ~ (2841 * Slope * V +2.02) / (600/Sc)^0.5,
+                         eD > 0.02 ~  exp(1.18*log(eD)+6.43)*(600/Sc)^0.5),
+           k = ifelse(is.na(k) == TRUE, .3, k)              
+           ) %>%
   dplyr::select(COMID, month, k) %>% 
   pivot_wider(names_from = "month", values_from = k, names_glue = "{month}_{.value}")
   
+
+print("min K")
+print(k %>% 
+  summarise(across(Jan_k:Dec_k, min)))
+
+print("NAs")
+print( k %>% 
+  summarise(across(Jan_k:Dec_k, ~sum(is.na(.x))))
+)
 
 
   
