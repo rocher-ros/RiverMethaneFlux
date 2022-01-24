@@ -310,7 +310,7 @@ return(list(preds, fit_wf, train_df))
 ## Run the model via map for each month ----
 
 #prepare a dataset, nesting by month
-data_model_nested <- grimeDB_attr_trans %>% 
+data_model_monthly <- grimeDB_attr_trans %>% 
   group_by(COMID, month) %>% 
   summarise(across(everything(), mean)) %>%
   ungroup() %>% 
@@ -321,7 +321,7 @@ data_model_nested <- grimeDB_attr_trans %>%
 set.seed(123)
 
 #Run the model for each month in a map
-# monthly_models <- data_model_nested %>%
+# monthly_models <- data_model_monthly %>%
 #   mutate(month_label = tolower(month.abb[month]),
 #          model_out = map(data, possibly(predict_RF_grime, otherwise = NA))) %>% 
 #   rowwise() %>%
@@ -349,7 +349,7 @@ monthly_models <- lst(
   oct = . %>% filter(month %in% 9:11),
   nov = . %>% filter(month %in% 10:12),
   dec = . %>% filter(month %in% c(11,12,1))) %>% 
-  map_dfr(~ tidyr::nest(.x(data_model_nested )), .id = "month_label") %>% 
+  map_dfr(~ tidyr::nest(.x(data_model_monthly )), .id = "month_label") %>% 
   mutate( model_out = map(data, possibly(predict_RF_grime, otherwise = NA))) %>% 
   rowwise() %>%
   mutate( preds = model_out[1],
@@ -392,7 +392,7 @@ get_vi_vals <- function(data){
 vi_monthly <- map(monthly_models[[3]], get_vi_vals)  %>% 
   set_names(monthly_models[[1]]) %>% 
   map_df( ~as.data.frame(.x), .id="month") %>% 
-  left_join(labeller_vars, by=c("Variable"="var")  )  %>%
+  left_join(labeller_vars, by=c("Variable" = "var")  )  %>%
   group_by(Variable) %>% 
   filter(median(Importance)> 21.5) %>%
   ungroup() 
@@ -494,6 +494,9 @@ vi_plot + inset_element(pdp_plot, left = -.088, bottom = -.034, right = .25, top
 
 ggsave("figures/rf_figure.png",  height = 7, width = 6, dpi=500)
 
+
+
+
 #partial dependence plots, for each month
 for (i in 1:12) {
   
@@ -564,11 +567,11 @@ vars_to_log_glob <-  global_preds %>%
  
 
 vars_to_remove <-  global_preds %>% 
-  select(contains(c('GPP_yr', 'S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",
+  select(contains(c('GPP_yr', 'S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH", "T_ECE", "S_ECE", 
                      'npp_', 'forest',  'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
-                     'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY", 
+                     'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY", "temp",
                     "N_aquaculture", "N_gnpp", "N_load", "N_point", "N_surface_runoff_agri", "N_surface_runoff_nat"),
-                  ignore.case = FALSE), lat, lon) %>%
+                  ignore.case = FALSE), lat, lon, slope, area) %>%
   colnames(.)
 
 
@@ -584,6 +587,52 @@ colnames(global_preds_trans)
 
 rm(global_preds, grimeDB_attributes)
 gc()
+
+# ASSESSMENT OF EXTRAPOLATION ----
+
+names_glob <- global_preds_trans %>% 
+  dplyr::select(-ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "aug", "sep", "oct", "nov", "dec")),
+                -COMID) %>% 
+  rename_all(~ str_replace(., "jul", "month")) %>% colnames() 
+
+names_train <- data_model_monthly %>% dplyr::select(-c(month, Log_CH4mean)) %>% colnames()
+
+
+setdiff(names_glob, names_train)
+
+# PCA of the training data
+pca_training <- prcomp(data_model_monthly %>% dplyr::select(-c(month, Log_CH4mean)),
+             center = FALSE,
+             scale. = FALSE)
+
+
+#25 axis to get to 90% of variation
+summary(pca_training)
+
+# PCA of the global data
+pca_world <- prcomp(global_preds_trans %>% 
+                      dplyr::select(-ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "aug", "sep", "oct", "nov", "dec")),
+                                    -COMID),
+                       center = FALSE,
+                       scale. = FALSE)
+
+summary(pca_world)
+
+df_pca_training = data.frame(PCA1 = pca_training$x[,"PC1"],
+                             PCA2 = pca_training$x[,"PC2"],
+                             PCA3 = pca_training$x[,"PC3"])
+
+df_pca_world = data.frame(PCA1 = pca_world$x[,"PC1"],
+                          PCA2 = pca_world$x[,"PC2"],
+                          PCA3 = pca_world$x[,"PC3"])
+
+ggplot()+
+  stat_density_2d(data=df_pca_world, aes(PCA1, PCA2, alpha = ..level..), geom = "polygon", bins = 4)+
+  geom_point(data=df_pca_training, aes(PCA1, PCA2), alpha=.5, color= "red3")
+
+
+
+
 
 predict_methane <- function(all_models, month, global_predictors) {
   all_months <- tolower(month.abb)
