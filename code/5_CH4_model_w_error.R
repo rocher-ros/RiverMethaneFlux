@@ -642,8 +642,8 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
     rowwise() %>% 
     mutate( mean = mean(c_across(everything()), na.rm = TRUE),
             sd = sd(c_across(everything()), na.rm = TRUE), 
-            ci_2.5 = mean - 0.95 * sd / m_res, 
-            ci_97.5 = mean + 0.95 * sd / m_res,
+            ci_2.5 = mean - 0.95 * sd / sqrt(m_res), 
+            ci_97.5 = mean + 0.95 * sd / sqrt(m_res),
             .keep = "none" ) %>% 
     rename_at(vars(everything()),  ~ paste0(month.abb[month], "_" , . ) )
   
@@ -651,8 +651,8 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
   
   done <- "done!"
   
-  out %>% 
-  write_csv(paste0("data/processed/meth_preds/ch4_pred_uncertainity_", month.abb[month], ".csv" ))
+  data_out %>% 
+  write_csv(paste0("data/processed/meth_preds/ch4_preds_uncertainity_", month.abb[month], ".csv" ))
   
   return(done)
 }
