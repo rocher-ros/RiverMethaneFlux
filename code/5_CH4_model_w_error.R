@@ -597,7 +597,7 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
   if(month == 12){ months_selected <- c(11, 12, 1) }
   
   #now keep those data from the dataframe
-  df <- data_model_monthly %>%
+  df <- data_model %>%
     filter(month %in% all_of(months_selected)) %>% 
     dplyr::select(-month)
   
@@ -624,7 +624,7 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
   
   month_selected <- all_months[month]
   
-  df_predictors <- global_preds_trans %>%
+  df_predictors <- global_predictors %>%
     select(-ends_with(setdiff(all_months, month_selected))) %>%
     rename_all(~ str_replace(., month_selected, "month"))
   
@@ -642,11 +642,8 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
     rowwise() %>% 
     mutate( mean = mean(c_across(everything()), na.rm = TRUE),
             sd = sd(c_across(everything()), na.rm = TRUE), 
-            ci_2.5 = mean - 0.95 * sd / sqrt(m_res), 
-            ci_97.5 = mean + 0.95 * sd / sqrt(m_res),
             .keep = "none" ) %>% 
     rename_at(vars(everything()),  ~ paste0(month.abb[month], "_" , . ) )
-  
   
   
   done <- "done!"
@@ -657,18 +654,33 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
   return(done)
 }
 
-ch4_jan <- predict_methane(data_model_monthly, 1, global_preds_trans)
-ch4_feb <- predict_methane(monthly_models, 2, global_preds_trans)
-ch4_mar <- predict_methane(monthly_models, 3, global_preds_trans)
-ch4_apr <- predict_methane(monthly_models, 4, global_preds_trans)
-ch4_may <- predict_methane(monthly_models, 5, global_preds_trans)
-ch4_jun <- predict_methane(monthly_models, 6, global_preds_trans)
-ch4_jul <- predict_methane(monthly_models, 7, global_preds_trans)
-ch4_aug <- predict_methane(monthly_models, 8, global_preds_trans)
-ch4_sep <- predict_methane(monthly_models, 9, global_preds_trans)
-ch4_oct <- predict_methane(monthly_models, 10, global_preds_trans)
-ch4_nov <- predict_methane(monthly_models, 11, global_preds_trans)
-ch4_dec <- predict_methane(monthly_models, 12, global_preds_trans)
+
+n_boot = 100
+
+#prepare a dataset, nesting by month
+data_model_monthly <- grimeDB_attr_trans %>% 
+  group_by(COMID, month) %>% 
+  summarise(across(everything(), mean)) %>%
+  ungroup() %>% 
+  dplyr::select(-all_of(variables_to_remove)) %>% 
+  drop_na()
+
+
+set.seed(123)
+
+ch4_jan <- predict_methane(data_model_monthly, 1, global_preds_trans, n_boot)
+
+ch4_feb <- predict_methane(data_model_monthly, 2, global_preds_trans, n_boot)
+ch4_mar <- predict_methane(data_model_monthly, 3, global_preds_trans, n_boot)
+ch4_apr <- predict_methane(data_model_monthly, 4, global_preds_trans, n_boot)
+ch4_may <- predict_methane(data_model_monthly, 5, global_preds_trans, n_boot)
+ch4_jun <- predict_methane(data_model_monthly, 6, global_preds_trans, n_boot)
+ch4_jul <- predict_methane(data_model_monthly, 7, global_preds_trans, n_boot)
+ch4_aug <- predict_methane(data_model_monthly, 8, global_preds_trans, n_boot)
+ch4_sep <- predict_methane(data_model_monthly, 9, global_preds_trans, n_boot)
+ch4_oct <- predict_methane(data_model_monthly, 10, global_preds_trans, n_boot)
+ch4_nov <- predict_methane(data_model_monthly, 11, global_preds_trans, n_boot)
+ch4_dec <- predict_methane(data_model_monthly, 12, global_preds_trans, n_boot)
 
 ggplot(ch4_jan)+
   geom_density(aes((Jan_ch4)))
