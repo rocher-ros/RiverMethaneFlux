@@ -28,6 +28,9 @@ meth_concs <- read_csv("data/processed/meth_predictions.csv")
 grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_lat_lon.csv") %>% 
   dplyr::select(-Length, -slope, -uparea)
 
+#mountains_df <- read_csv("data/raw/gis/GRADES_attributes/mountains.csv")
+
+
 #join it into one file 
 meth_gis <- meth_concs %>% 
   left_join( grades, by = "COMID") %>%
@@ -37,142 +40,6 @@ rm(grades, meth_concs, meth_fluxes)
 gc()
 
 
-# 2. Maps ----
-# Firs we need some data processing
-
-#calculate average yearly values, takes some time 
-meth_avg <- meth_gis %>% 
-  drop_na(Jan_ch4F) %>% 
-  rowwise() %>% 
-  mutate( ch4_mean = mean(Jan_ch4:Dec_ch4, na.rm= TRUE),
-          Fch4_mean = mean(Jan_ch4F:Dec_ch4F, na.rm= TRUE),
-          area_mean = mean(Jan_area_m2:Dec_area_m2, na.rm= TRUE)/1e+6) %>% 
-  select(COMID, lon, lat, ch4_mean, Fch4_mean, area_mean, runoff = runoffFL) %>%
-  st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
-  st_transform("+proj=eqearth +wktext") 
-
-
-#download world map
-world <-  ne_download(scale = 110, type = 'land', category = 'physical', returnclass = "sf") %>%
-  st_transform("+proj=eqearth +wktext") 
-
-#and lake layer
-lakes <- ne_download(scale = 50, type = 'lakes', category = 'physical', returnclass = "sf")
-
-#and mountains
-mountains <- read_sf("data/raw/gis/global_mountains/CMEC_Mountains_Enh2018.shp") %>% 
-  st_transform(4326)
-
-#make a hex grid for the world and keep only terrestrial masses
-grid <- st_make_grid(
-  world,
-  n = c(250, 250), # grid granularity
-  crs = st_crs(world),
-  what = "polygons",
-  square = FALSE) %>% 
-  st_intersection( world)
-
-grid <- st_sf(index = 1:length(lengths(grid)), grid) 
-
-
-#join the meth data to the grid
-meth_hexes <- st_join(meth_avg, grid, join = st_intersects)
-
-#now aggregate all the meth data for each hex, do means and sum for area.
-meth_hexes_avg <- meth_hexes %>% 
-  group_by(index) %>%
-  summarise(ch4_mean = mean(ch4_mean, na.rm = TRUE),
-            Fch4_mean = mean(Fch4_mean, na.rm = TRUE),
-            runoff = mean(runoff, na.rm = TRUE),
-            area = sum(area_mean, na.rm = TRUE)) %>%
-  st_sf()  
-
-
-
-#buffer df to shrink each hex according to runoff
-buffers <- meth_hexes_avg %>% 
-  st_drop_geometry() %>%
-  right_join(grid, by="index") %>%
-  mutate(
-      buffer_change = case_when(
-        runoff < 25 ~ -30000,
-        runoff >= 25 & runoff < 50 ~ -20000,
-        runoff >= 50 & runoff < 100 ~ -15000,
-        runoff >= 100 & runoff < 200 ~ -10000,
-        runoff >= 200 & runoff < 400 ~ -5000,
-        runoff >= 400 & runoff < 700 ~ -2000,
-        runoff >= 700 & runoff < 1000 ~ -1000,
-        runoff >= 1000  ~ 0,
-        is.na(ch4_mean) == TRUE ~ 0),
-      buffer_change_area = case_when(
-        area < 25 ~ -30000,
-        area >= 25 & area < 50 ~ -20000,
-        area >= 50 & area < 75 ~ -15000,
-        area >= 75 & area < 100 ~ -10000,
-        area >= 100 & area < 150 ~ -5000,
-        area >= 150 & area < 300 ~ -1000,
-        area >= 300  ~ 0,
-        is.na(ch4_mean) == TRUE ~ 0)
-      )
- 
-
-#shrink the hexes by river area or runoff
-meth_hexes_avg2 <- meth_hexes_avg %>%
-  st_drop_geometry() %>%
-  right_join(grid, by="index") %>%
-  st_sf() %>% 
-  st_buffer( dist = buffers$buffer_change)
-
-## map of concentrations ----
-map_ch4 <- ggplot() +
-  geom_sf(
-    data = meth_hexes_avg2, color = NA,
-    aes( fill = ch4_mean) )+
-  geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
-  scale_fill_viridis_c(
-    option = "magma", na.value = "gray",
-    direction = -1,
-    #trans = "pseudo_log", 
-    name = "**CH<sub>4</sub> conc.** <br>(mmol m<sup>-3</sup>)")+
-  guides( fill = guide_colourbar(title.position = "top"))+
-  theme_void()+
-  theme(legend.position = c(0.2, 0.35),
-        legend.direction = "vertical",
-        legend.title = ggtext::element_markdown(size = 10),
-        legend.text = element_text(size=9),
-        legend.key.height  = unit(.5, 'cm'),
-        legend.key.width =  unit(.3, 'cm'))
-
-#ggsave(map_ch4, filename = "figures/map_ch4.png", dpi=600, height = 10, width = 16)
-
-
-## map of fluxes ----
-map_fch4 <- 
-  ggplot()+
-  geom_sf(
-    data = meth_hexes_avg2, 
-    aes(fill = Fch4_mean*16/12), color = NA )+
-  geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
- # geom_sf(data=mountains, fill=NA,  alpha=.3, color="gray20" )+
-  scale_fill_viridis_c(
-    option = "magma", na.value = "gray",
-   # trans = "pseudo_log", 
-    #breaks= c(0,1,5,10,30),
-    direction = -1,
-    name = "**CH<sub>4</sub> flux** <br> (g CH<sub>4</sub> m^-2 d<sup>-1</sup>)")+
-  guides( fill = guide_colourbar(title.position = "top"))+
-  theme_void()+
-  theme(legend.position = c(0.2, 0.35),
-        legend.direction = "vertical",
-        legend.title = ggtext::element_markdown(size = 10),
-        legend.key.height  = unit(.5, 'cm'),
-        legend.key.width =  unit(.3, 'cm'))
-
-#ggsave(filename = "figures/map_ch4_flux_mountains2.png", dpi= 600, height = 10, width = 12)
-
-maps_combined <- map_ch4 / map_fch4
-
-ggsave(maps_combined, filename = "figures/fig_maps.png", dpi= 1000)
 # Figure of seasonal and latitudinal patterns 
 
 colnames(meth_gis)
@@ -311,7 +178,144 @@ season_lat_plot +  inset_element(total_lats, left = .97, right = 1.4, bottom = -
 
 ggsave("figures/emissions_lat_season.png", width =8, height = 8)
 
+seasonal_df_long %>% 
+  ggplot(aes(month, ch4))+
+  geom_col()+
+  #scale_y_continuous(trans = "sqrt", breaks = c(0, 0.04, .2, 0.4), 
+  #                   limits = c(0, NA) , expand=c(0,0))+
+  #scale_fill_viridis_c(trans="log10", direction = -1)+
+  facet_wrap(~lat_label, ncol = 1, strip.position = "right")+
+  theme_bw()
 
+
+#calculate average methane for each site
+meth_avg <- meth_gis %>% 
+  drop_na(Jan_ch4F) %>% 
+  rowwise() %>% 
+  mutate( ch4_mean = mean(Jan_ch4:Dec_ch4, na.rm= TRUE),
+          Fch4_mean = mean(Jan_ch4F:Dec_ch4F, na.rm= TRUE),
+          area_mean = mean(Jan_area_m2:Dec_area_m2, na.rm= TRUE)/1e+6) %>% 
+  select(COMID, lon, lat, ch4_mean, Fch4_mean, area_mean, runoff = runoffFL) %>%
+  #left_join(mountains_df, by = "COMID") %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
+  st_transform("+proj=eqearth +wktext") 
+
+# 2. Maps ----
+#download world maps
+world <-  ne_download(scale = 110, type = 'land', category = 'physical', returnclass = "sf") %>%
+  st_transform("+proj=eqearth +wktext") 
+
+#and lake layer
+lakes <- ne_download(scale = 50, type = 'lakes', category = 'physical', returnclass = "sf")
+
+mountains <- read_sf("data/raw/gis/global_mountains/CMEC_Mountains_Enh2018.shp") %>% 
+  st_transform(4326)
+
+#make a hex grid for the world and keep only terrestrial masses
+grid <- st_make_grid(
+  world,
+  n = c(250, 250), # grid granularity
+  crs = st_crs(world),
+  what = "polygons",
+  square = FALSE) %>% 
+  st_intersection( world)
+
+grid <- st_sf(index = 1:length(lengths(grid)), grid) 
+
+
+#join the meth data to the grid
+meth_hexes <- st_join(meth_avg, grid, join = st_intersects)
+
+#now aggregate all the meth data for each hex, do means.
+meth_hexes_avg <- meth_hexes %>% 
+  group_by(index) %>%
+  summarise(ch4_mean = mean(ch4_mean, na.rm = TRUE),
+            Fch4_mean = mean(Fch4_mean, na.rm = TRUE),
+            runoff = mean(runoff, na.rm = TRUE),
+            area = sum(area_mean, na.rm = TRUE)) %>%
+  st_sf()  
+
+ggplot(meth_hexes_avg %>% filter(area < 500))+
+  geom_density(aes(x=area))
+
+#buffer df to shrink each hex according to runoff
+buffers <- meth_hexes_avg %>% 
+  st_drop_geometry() %>%
+  right_join(grid, by="index") %>%
+  mutate(
+    buffer_change = case_when(
+      runoff < 25 ~ -30000,
+      runoff >= 25 & runoff < 50 ~ -20000,
+      runoff >= 50 & runoff < 100 ~ -15000,
+      runoff >= 100 & runoff < 200 ~ -10000,
+      runoff >= 200 & runoff < 400 ~ -5000,
+      runoff >= 400 & runoff < 700 ~ -2000,
+      runoff >= 700 & runoff < 1000 ~ -1000,
+      runoff >= 1000  ~ 0,
+      is.na(ch4_mean) == TRUE ~ 0),
+    buffer_change_area = case_when(
+      area < 25 ~ -30000,
+      area >= 25 & area < 50 ~ -20000,
+      area >= 50 & area < 75 ~ -15000,
+      area >= 75 & area < 100 ~ -10000,
+      area >= 100 & area < 150 ~ -5000,
+      area >= 150 & area < 300 ~ -1000,
+      area >= 300  ~ 0,
+      is.na(ch4_mean) == TRUE ~ 0)
+  )
+
+
+#shrink the hexes by river area or runoff
+meth_hexes_avg2 <- meth_hexes_avg %>%
+  st_drop_geometry() %>%
+  right_join(grid, by="index") %>%
+  st_sf() %>% 
+  st_buffer( dist = buffers$buffer_change)
+
+## map of concentrations ----
+ggplot() +
+  geom_sf(
+    data = meth_hexes_avg2, color = NA,
+    aes( fill = ch4_mean) )+
+  geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
+  scale_fill_viridis_c(
+    option = "magma", na.value = "gray",
+    direction = -1,
+    #trans = "pseudo_log", 
+    name = "**Methane concentration** <br>(mmol m^-3 )")+
+  guides( fill = guide_colourbar(title.position = "top"))+
+  theme_void()+
+  theme(legend.position = c(0.55, 0.18),
+        legend.direction = "horizontal",
+        legend.title = ggtext::element_markdown(size = 14),
+        legend.text = element_text(size=12),
+        legend.key.size = unit(.9, 'cm'))
+
+ggsave(filename = "figures/map_ch4.png", dpi=600, height = 10, width = 16)
+
+
+## map of fluxes ----
+ggplot() +
+  geom_sf(
+    data = meth_hexes_avg2, 
+    aes(fill = Fch4_mean*16/12), color = NA )+
+  geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
+  # geom_sf(data=mountains, fill=NA,  alpha=.3, color="gray20" )+
+  scale_fill_viridis_c(
+    option = "magma", na.value = "gray",
+    # trans = "pseudo_log", 
+    #breaks= c(0,1,5,10,30),
+    direction = -1,
+    name = "**Methane flux** <br> (g CH<sub>4</sub> m^-2 d^-1 )")+
+  guides( fill = guide_colourbar(title.position = "top"))+
+  theme_void()+
+  theme(legend.position = c(0.55, 0.18),
+        legend.direction = "horizontal",
+        legend.title = ggtext::element_markdown(size = 14),
+        legend.text = element_text(size=12),
+        legend.key.size = unit(.9, 'cm'))
+
+ggsave(filename = "figures/map_ch4_flux_mountains2.png", dpi= 600, height = 10, width = 12)
 
 
 #meth relationships with k
@@ -413,12 +417,12 @@ flux_comp <- flux_comid %>%
          k600_obs = k_obs*(600/sc_obs)^(-.5),
          #sc_pred = 1824 - 98.12 * x + 2.413 * (x^2) - 0.0241 * (x^3),
          k600_pred = k_pred*(600/sc_obs)^(-.5)
-         ) 
+  ) 
 
 
 
 flux_comp %>% filter( !k_method %in% c("not determined", "other"),
-                       flux_pred > 0, Diffusive_CH4_Flux_Mean > 0, is.na(k_obs) == FALSE) %>%  
+                      flux_pred > 0, Diffusive_CH4_Flux_Mean > 0, is.na(k_obs) == FALSE) %>%  
   ggplot(aes(Diffusive_CH4_Flux_Mean, flux_pred, color=(k600_pred/k600_obs)*100), alpha=.5, size=2)+
   geom_point()+
   geom_abline(slope=1, intercept = 0)+
@@ -437,12 +441,12 @@ ggsave("figures/flux_comp_allk.png")
 
 ggplot(data= flux_comp %>% filter( !k_method %in% c("not determined", "other"),
                                    #distance_snapped < 10,
-                                     k600_pred/k600_obs > .5 &  k600_pred/k600_obs < 1.5, 
+                                   k600_pred/k600_obs > .5 &  k600_pred/k600_obs < 1.5, 
                                    flux_pred > 0, Diffusive_CH4_Flux_Mean > 0),
-         aes(Diffusive_CH4_Flux_Mean, flux_pred))+
-    geom_point(data=flux_comp %>% filter( !k_method %in% c("not determined", "other"),
-                                          flux_pred > 0, Diffusive_CH4_Flux_Mean > 0, is.na(k600_obs) == FALSE),
-               aes(Diffusive_CH4_Flux_Mean, flux_pred, color=(k600_pred/k600_obs)*100), alpha=.5, size=2)+
+       aes(Diffusive_CH4_Flux_Mean, flux_pred))+
+  geom_point(data=flux_comp %>% filter( !k_method %in% c("not determined", "other"),
+                                        flux_pred > 0, Diffusive_CH4_Flux_Mean > 0, is.na(k600_obs) == FALSE),
+             aes(Diffusive_CH4_Flux_Mean, flux_pred, color=(k600_pred/k600_obs)*100), alpha=.5, size=2)+
   geom_point( color="black", size=2)+
   geom_abline(slope=1, intercept = 0)+
   geom_smooth(method="lm")+
@@ -457,7 +461,7 @@ ggplot(data= flux_comp %>% filter( !k_method %in% c("not determined", "other"),
   theme_bw()+
   theme(legend.key.size = unit(1, 'cm'))
 
-  ggsave("figures/flux_comp_similark.png")
+ggsave("figures/flux_comp_similark.png")
 
 flux_comp %>% 
   filter(k_pred > .01, k_obs > .01) %>% 
@@ -473,7 +477,7 @@ flux_comp %>%
 ggsave("figures/flux_comp_boxplot.png")
 
 flux_comp %>% filter(k_pred > .1, k_obs > .1, !k_method %in% c("not determined", "other")) %>% 
-ggplot( aes(k_obs, k_pred))+
+  ggplot( aes(k_obs, k_pred))+
   geom_point()+
   geom_abline(slope=1, intercept = 0)+
   geom_smooth(method="lm", se=FALSE)+
@@ -493,8 +497,8 @@ slope_flux <- ggplot(meth_avg, aes(Slope, Fch4_mean))+
                filter(Diffusive_CH4_Flux_Mean > 0.0001, Slope>0),
              aes(Slope, Diffusive_CH4_Flux_Mean), alpha=.4)+
   geom_smooth(data=flux_comp %>%
-                  filter(Diffusive_CH4_Flux_Mean > 0.0001, Slope>0),
-                aes(Slope, Diffusive_CH4_Flux_Mean), color="red3")+
+                filter(Diffusive_CH4_Flux_Mean > 0.0001, Slope>0),
+              aes(Slope, Diffusive_CH4_Flux_Mean), color="red3")+
   scale_x_log10(labels=scales::number)+
   scale_y_log10(labels=scales::number)+
   scale_fill_viridis_c()+
@@ -614,15 +618,15 @@ flux_comid %>%
   left_join(mountains_df) %>% 
   group_by(mountains) %>% 
   summarise(fch4= mean(Diffusive_CH4_Flux_Mean, na.rm =TRUE))
-  
+
 meth_avg %>% 
   st_drop_geometry() %>% 
   group_by(mountains) %>% 
   summarise(fch4= mean(Fch4_mean))
-  
+
 flux_comid %>% 
-    left_join(mountains_df) %>% 
-    ggplot(aes(x=as.factor(mountains), Diffusive_CH4_Flux_Mean ))+
+  left_join(mountains_df) %>% 
+  ggplot(aes(x=as.factor(mountains), Diffusive_CH4_Flux_Mean ))+
   stat_summary(geom = "pointrange", fun.data = "mean_se")
 
 
@@ -631,4 +635,4 @@ meth_avg %>%
   st_drop_geometry() %>% 
   ggplot(aes(x=as.factor(mountains), Fch4_mean ))+
   stat_summary(geom = "pointrange", fun.data = "mean_se")
-  
+

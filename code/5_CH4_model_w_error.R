@@ -6,7 +6,7 @@
 
 # 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip', 'corrr', 'ggpubr', 'DALEXtra', 'ggtext')
+package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip', 'corrr', 'ggpubr', 'DALEXtra', 'ggtext', 'patchwork')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -17,23 +17,6 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 # Now load all the packages
 lapply(package_list, require, character.only = TRUE)
 
-# Function to calculate gas saturation, 
-# from temperature ( in Kelvin) and atm pressure (derived from elevation (in m.a.s.l) for CH4 
-# Henry's Law constants from http://www.henrys-law.org
-# Temperature correction using van't Hoff equation , temperature is in (Kelvin)
-# Kh is in ("Kh, cp") = (mol/L*Atm) at STP
-# Concentrations (mole fraction, also ppmv) in the atmosphere are approximate for 2013, should be updated over time
-# AtmP is in (atmospheres)
-
-get_Ch4eq <- function(temperature, elevation){
-  
-  pressure <- (1-(.0000225577*elevation))^5.25588
-  Kh <- (1.4*10^-3)*exp(1700*((1/temperature)-(1/298)))
-  AtmosphereConc <-  1.83
-  EquilSaturation <- AtmosphereConc*Kh/pressure #umol/L, mmol/m3
-  
-  return(EquilSaturation)
-}
 
 
 ## Read files ----
@@ -54,64 +37,24 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 # 1. remove aggregated sites
 # 2. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
 #    Thermogenically affected, Ditches
-grimeDB_attributes <- read_csv("data/processed/grimeDB_flux_with_grade_attributes.csv") %>% 
+grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
   filter(`Aggregated?` == "No",
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
   mutate( month=month(date)) %>% 
-  dplyr::select( COMID, Site_Nid,  diffusion=Diffusive_CH4_Flux_Mean, month, GPP_yr:month,
-                 -c(Channel_type, Eb_CH4_Flux_Mean,`Aggregated?`, date, area, T_ECE, S_ECE, 
-                    temp_month)) %>% 
-  drop_na(diffusion)
+  dplyr::select( COMID, Site_Nid, CH4mean, month, GPP_yr:month, 
+                 -c(Channel_type, `Aggregated?`, date_end, date, area, T_ECE, S_ECE, slope,
+                    temp_month, WaterTemp_actual, WaterTemp_est, discharge_measured)) 
 
 colnames(grimeDB_attributes)
-
 
 labeller_vars <- read_csv("data/processed/variables_names.csv") %>% 
   mutate(label=str_replace(label, "9", ";"))
 
-#get the concs and calculate k and estimate fluxes
-grimeDB_attributes_concs <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
-  filter(`Aggregated?` == "No", distance_snapped < 2000,
-         !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
-  mutate( month=month(date),
-          WaterTemp_best = if_else(is.na(WaterTemp_actual) == FALSE,WaterTemp_actual, WaterTemp_est),
-         WaterTemp_best = if_else(is.na(WaterTemp_best) == FALSE,WaterTemp_best,  0.67 * tavg_month + 7.45),
-         q_best = if_else(is.na(discharge_measured) == FALSE, discharge_measured, q_month),
-         velocity = exp(0.12 * log(q_best) - 1.06),
-         schmidt=  1824 - 98.12 * WaterTemp_best + 2.413 * (WaterTemp_best^2) - 0.0241 * (WaterTemp_best^3),
-         eD = 9.81 * slope * velocity,
-         k = case_when(slope <= 0.01 | eD <= 0.02 ~ (2841 * slope * velocity) / (600/schmidt)^0.5,
-                        eD > 0.02 ~  exp(1.18*log(eD)+6.43)*(600/schmidt)^0.5),
-         f_CH4 = (CH4mean - get_Ch4eq(WaterTemp_best + 273.15, elev))*k,
-         f_CH4 = if_else(f_CH4 < 0, 0, f_CH4)
-         ) %>% 
-  drop_na(CH4mean, f_CH4 ) %>% 
-  dplyr::select( COMID, Site_Nid, month, q_best, k, f_CH4, GPP_yr:month, 
-                 -c(Channel_type,`Aggregated?`, date, area, T_ECE, S_ECE, temp_month)) 
-
-mean(grimeDB_attributes$diffusion)
-mean(grimeDB_attributes_concs$f_CH4)
-colnames(grimeDB_attributes_concs)
-
-grimeDB_attributes_concs %>% 
-  ggplot(aes(k_month, f_CH4))+
-  geom_point()
-
-left_join(grimeDB_attributes, grimeDB_attributes_concs, by=c("Site_Nid", "month")) %>% 
-  filter(diffusion > 0, f_CH4 > 0 ) %>% 
-  ggplot(aes(diffusion, f_CH4 ))+
-  geom_point()+
-  geom_abline(slope=1, intercept = 0)+
-  scale_x_log10()+
-  scale_y_log10()
-
-summary(grimeDB_attributes_concs$f_CH4)
-
 # Explore the raw data and process before the modelling
 
 # we will log transform those to start with
-vars_to_log <- c('f_CH4','q_month' ,'uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
-                 'T_ESP', "N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture",
+vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
+                 'T_ESP', "N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture", "q_month",
                  "P_gnpp", "P_background", "P_load", "P_point", "P_surface_runoff_agri", "P_surface_runoff_nat", "N_retention_subgrid")
 
 # Select useful variables for the model, some variables were removed due to a high correlation with other ones 
@@ -122,7 +65,7 @@ variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S
 
 
 #dataset with some variables log transformed
-grimeDB_attr_trans <- grimeDB_attributes_concs %>%
+grimeDB_attr_trans <- grimeDB_attributes %>%
   mutate(across(.cols=all_of(vars_to_log), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
   rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
@@ -139,32 +82,32 @@ grimeDB_attr_trans %>%
   facet_wrap(~label, scales='free')+
   theme(strip.text = ggtext::element_markdown())
 
-ggsave("figures/histograms_transformed_flux.png", width=16, height = 12)
+ggsave("figures/histograms_transformed.png", width=16, height = 12)
 
 
 
 #pearson correlations for CH4 with the predictors
 corr_ch4 <- grimeDB_attr_trans %>% 
   correlate() %>% 
-  focus(Log_diffusion)
+  focus(Log_CH4mean)
 
-#grimeDB_attr_trans %>% 
-#  correlate() %>% 
-#  rplot(shape = 20, colors = c("red", "green"), print_cor = TRUE)+
-#  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+grimeDB_attr_trans %>% 
+  correlate() %>% 
+  rplot(shape = 20, colors = c("red", "green"), print_cor = TRUE)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
-#ggsave("figures/correlations_predictors.png", width=16, height = 12)
+ggsave("figures/correlations_predictors.png", width=16, height = 12)
 
 #check the coefficients in the console
 corr_ch4 %>% 
-  arrange(desc(abs(Log_diffusion))) %>% 
+  arrange(desc(abs(Log_CH4mean))) %>% 
   print(n=50)
 
 
 #get the r coefficients from the df for later plotting
 vars_for_plot <- corr_ch4 %>% 
-  arrange(desc(abs(Log_diffusion))) %>% 
-  mutate(predictor=fct_reorder(term, desc(abs(Log_diffusion)))) %>% 
+  arrange(desc(abs(Log_CH4mean))) %>% 
+  mutate(predictor=fct_reorder(term, desc(abs(Log_CH4mean)))) %>% 
   select(-term) %>% 
   filter(!predictor %in% c("COMID", "Site_Nid", "month"))
 
@@ -172,20 +115,19 @@ vars_for_plot <- corr_ch4 %>%
 #scatter plots of all variables, sorted from highest to lower r. 
 # Showing a loess fit to capture potential nonlinearities that might be useful to assess. don't run it often as it takes a while...
 plot_correlations <- grimeDB_attr_trans %>% 
-  select(-c("COMID", "Site_Nid", "month")) %>% 
   pivot_longer(all_of(vars_for_plot$predictor), names_to = "predictor", values_to = "value" ) %>% 
   mutate(predictor=fct_relevel(predictor, levels(vars_for_plot$predictor))) %>% 
-  ggplot(aes(value, Log_ebullition))+
+  ggplot(aes(value, Log_CH4mean))+
   geom_hex(bins = 30) +
   geom_smooth(method = "loess", se=FALSE, color="red3")+
   geom_text( data = vars_for_plot, 
-             mapping = aes(x = Inf, y = Inf, label = paste("r=",round(Log_ebullition,2))), hjust   = 3.5, vjust   = 1.5, color="red")+
+             mapping = aes(x = Inf, y = Inf, label = paste("r=",round(Log_CH4mean,2))), hjust   = 3.5, vjust   = 1.5, color="red")+
   theme_classic()+
   scale_fill_continuous(type = "viridis", trans = "log10")+
   facet_wrap(~predictor, scales='free')
 
 
-ggsave(filename= "figures/correlations_ebullition.png", plot=plot_correlations, width = 18, height = 12)
+ggsave(filename= "figures/correlations.png", plot=plot_correlations, width = 18, height = 12)
 
 # 2.  RF model using tidymodels ----
 
@@ -347,12 +289,9 @@ predict_RF_grime <- function(df) {
   train_df <- training(split)
   test_df <- testing(split)
   
-  
-  
   #create recipe
   recipe_train <- train_df %>% 
-    recipe(Log_f_CH4 ~.)# %>% 
-  #step_normalize(all_predictors(), -all_outcomes())
+    recipe(Log_CH4mean ~.)
   
   #fit workflow on train data
   fit_wf <-
@@ -364,21 +303,6 @@ predict_RF_grime <- function(df) {
   preds <- predict(fit_wf, test_df) %>% 
     bind_cols(test_df)
   
-  # get quantile regression intervals as 
-  # https://www.bryanshalloway.com/2021/04/21/quantile-regression-forests-for-prediction-intervals/ 
-  #https://www.jmlr.org/papers/volume7/meinshausen06a/meinshausen06a.pdf
-  # preds <- predict(
-  #   fit_wf$fit$fit$fit, 
-  #   workflows::extract_recipe(fit_wf) %>% bake(test_df),
-  #   type = "quantiles",
-  #   quantiles = c(.05, .95, 0.50) ) %>% 
-  #   with(predictions) %>% 
-  #   as_tibble() %>% 
-  #   set_names(paste0(".pred", c("_lower", "_upper", ""))) %>% 
-  #   bind_cols(test_df)
-  
-  
-  
   return(list(preds, fit_wf, train_df))
   
 }
@@ -386,19 +310,18 @@ predict_RF_grime <- function(df) {
 ## Run the model via map for each month ----
 
 #prepare a dataset, nesting by month
-data_model_nested <- grimeDB_attr_trans %>%
-  dplyr::select(-c(k, q_best, Log_k_month, slope)) %>% 
+data_model_monthly <- grimeDB_attr_trans %>% 
   group_by(COMID, month) %>% 
   summarise(across(everything(), mean)) %>%
   ungroup() %>% 
-  select(-all_of(variables_to_remove)) %>% 
+  dplyr::select(-all_of(variables_to_remove)) %>% 
   drop_na()
 
 
 set.seed(123)
 
 #Run the model for each month in a map
-# monthly_models <- data_model_nested %>%
+# monthly_models <- data_model_monthly %>%
 #   mutate(month_label = tolower(month.abb[month]),
 #          model_out = map(data, possibly(predict_RF_grime, otherwise = NA))) %>% 
 #   rowwise() %>%
@@ -406,8 +329,13 @@ set.seed(123)
 #     model_fit = model_out[2]) %>% 
 #   select(-data, -model_out)
 
-#Feed the adjacent months for each month, adapted from
-# https://community.rstudio.com/t/many-models-with-overlapping-groups/1629/4
+# Now finally run the model for each month, using data of adjacent months for each month
+# First make a pointer of the data to use for each months, overlapping, 
+# Second nest them by month,  third run the model with a map,
+# Fourth extract the model output and predicted values
+# the lst chunk adapted from: https://community.rstudio.com/t/many-models-with-overlapping-groups/1629/4
+# those are the most efficient lines of code I have ever written, 
+# 3 years ago it would have taken me about 900 lines of code!! 
 monthly_models <- lst(
   jan = . %>% filter(month %in% c(12,1,2)),
   feb = . %>% filter(month %in% 1:3),
@@ -421,18 +349,20 @@ monthly_models <- lst(
   oct = . %>% filter(month %in% 9:11),
   nov = . %>% filter(month %in% 10:12),
   dec = . %>% filter(month %in% c(11,12,1))) %>% 
-  map_dfr(~ tidyr::nest(.x(data_model_nested )), .id = "month_label") %>% 
+  map_dfr(~ tidyr::nest(.x(data_model_monthly )), .id = "month_label") %>% 
   mutate( model_out = map(data, possibly(predict_RF_grime, otherwise = NA))) %>% 
   rowwise() %>%
   mutate( preds = model_out[1],
           model_fit = model_out[2]) %>% 
   select(-data, -model_out)
 
+
+
 #plot them  
 monthly_models %>% 
   mutate(month_label= fct_relevel(month_label, levels = tolower(month.abb))) %>% 
   unnest(preds) %>% 
-  ggplot( aes(.pred, Log_f_CH4))+
+  ggplot( aes(.pred, Log_CH4mean))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
   stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
@@ -440,14 +370,14 @@ monthly_models %>%
   theme_bw()+
   facet_wrap(~month_label)
 
-ggsave(filename= "figures/model_flux_perf_monthly_adjacent.png", width = 12, height = 8)
+#ggsave(filename= "figures/model_perf_monthly_adjacent.png", width = 12, height = 8)
 
 #residuals
 monthly_models %>% 
   unnest(preds) %>%  
-  ggplot( aes(.pred, Log_f_CH4-.pred))+
+  ggplot( aes(.pred, Log_CH4mean-.pred))+
   geom_point()+
-  geom_smooth(method="lm")+
+  #geom_smooth(method="lm")+
   geom_hline(yintercept = 0)+
   labs(x="CH4 predictions", y="Residuals")+
   theme_bw()
@@ -460,6 +390,24 @@ get_vi_vals <- function(data){
     vi()
 }
 
+
+vi_monthly <- map(monthly_models[[3]], get_vi_vals)  %>% 
+  set_names(monthly_models[[1]]) %>% 
+  map_df( ~as.data.frame(.x), .id="month") %>% 
+  left_join(labeller_vars, by=c("Variable"="var")  )  %>%
+  group_by(Variable) %>% 
+  filter(median(Importance)> 21.5) %>%
+  ungroup() 
+
+vi_monthly_mean <- vi_monthly %>% 
+  group_by(Variable) %>% 
+  summarise(Importance=median(Importance),
+            label=first(label),
+            type=first(type)) %>% 
+  ungroup() %>% 
+  arrange(desc(Importance)) %>% 
+  mutate(label= factor(label, unique(label)))
+
 median_se <- function(x) {
   x <- stats::na.omit(x)
   se <- sqrt(stats::var(x)/length(x))
@@ -469,38 +417,84 @@ median_se <- function(x) {
              ymax = median + se)
 }
 
-vi_monthly <- map(monthly_models[[3]], get_vi_vals)  %>% 
-  set_names(monthly_models[[1]]) %>% 
-  map_df( ~as.data.frame(.x), .id="month") %>% 
-  left_join(labeller_vars, by=c("Variable"="var")  )  %>%
-  group_by(Variable) %>% 
-  filter(median(Importance)> 25.5) %>%
-  ungroup() 
-
-vi_monthly_mean <- vi_monthly %>% 
-  group_by(Variable) %>% 
-  summarise(Importance=median(Importance),
-            label=first(label)) %>% 
-  ungroup() %>% 
-  arrange(desc(Importance)) %>% 
-  mutate(label= factor(label, unique(label)))
-
-
-
-vi_monthly %>% 
+vi_plot <- vi_monthly %>% 
   ggplot( aes(x=Importance, 
               y=  reorder(label, Importance, FUN = median)))+
   stat_summary( aes(fill = type), color=NA, geom="bar", fun="median", alpha=.8)+
   stat_summary(fun.data = median_se, geom = "linerange", size=1.5, alpha=.6)+
   scale_x_continuous(expand = c(0,0))+
-  scale_fill_manual(values=c("forestgreen", "dodgerblue3", "brown3", "darkgoldenrod3", "gray50", "chocolate"), name="Category")+
+  #scale_y_discrete(position = "right")+
+  scale_fill_manual(values=c("forestgreen", "dodgerblue3", "brown3", "darkgoldenrod3", "gray60", "chocolate"), name="Category")+
   theme_classic()+
-  labs(y="")+
+  labs(y="", fill="Category")+
+  theme(legend.position = c(.8,.15), axis.text.y =ggtext::element_markdown(), legend.title =element_text(face="bold") )
 
-  theme(legend.position = c(.85,.17), axis.text.y =ggtext::element_markdown())
+ggsave(vi_plot, filename = "figures/VIP_scores_monthly.png", height = 8, width = 6, dpi=500)
 
-ggsave(filename = "figures/VIP_scores_monthly_flux.png", height = 8, width = 6, dpi=500)
 
+## run the data on the whole dataset, not nesting by month ----
+
+set.seed(123)
+
+#Run the model for each month in a map
+yearly_model <- grimeDB_attr_trans %>%
+  group_by(COMID, month) %>% 
+  summarise(across(everything(), mean)) %>%
+  ungroup() %>% 
+  select(-all_of(variables_to_remove)) %>% 
+  drop_na() %>% 
+  predict_RF_grime()
+
+yearly_preds <- yearly_model[1] %>% as.data.frame()
+
+#partial dependence plots 
+rf_fit <- yearly_model[[2]] %>% 
+  fit(data = yearly_model[[3]])
+
+explainer_rf <- explain_tidymodels(
+  rf_fit, 
+  data = dplyr::select(yearly_model[[3]], -Log_CH4mean), 
+  y = yearly_model[[3]]$Log_CH4mean,
+  label = "random forest"
+)
+
+pdp_rf <- model_profile(explainer_rf, N = 5000)
+
+pdp_data_plot <- pdp_rf$agr_profiles %>% 
+  dplyr::select(Variable = `_vname_`, x=`_x_`, y_hat = `_yhat_`) %>%
+  right_join(vi_monthly_mean, by=c("Variable")) %>%
+  mutate(label=fct_relevel(label, levels(vi_monthly_mean$label))) %>% 
+  group_by(Variable) %>% 
+  mutate(x = (x - min(x, na.rm = T))/(max(x, na.rm = T) - min(x, na.rm = T)),
+         y_hat = (y_hat - min(y_hat, na.rm = T))/(max(y_hat, na.rm = T) - min(y_hat, na.rm = T))) %>% 
+  drop_na(y_hat) 
+
+pdp_plot <- pdp_data_plot %>% 
+  ggplot(aes(x, y_hat, color=type))+
+  geom_line(size=1)+
+  scale_color_manual(values=c("darkgreen", "dodgerblue4", "brown4", "darkgoldenrod4", "gray40", "chocolate4"))+
+  facet_grid( scales = "free", rows=vars(label))+
+  theme_classic()+
+  labs(x="", y="") +
+  theme(
+    legend.position = "none",
+    strip.background = element_blank(),
+    strip.text = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_line(color="transparent"),
+    axis.line = element_line(color="transparent"),
+    rect = element_rect(fill = "transparent"),
+    panel.background = element_rect(fill = "transparent"), # bg of the panel
+    plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+    panel.grid.major = element_blank(), # get rid of major grid
+    panel.grid.minor = element_blank(), # get rid of minor grid
+  )
+
+pdp_plot
+
+vi_plot + inset_element(pdp_plot, left = -.088, bottom = -.034, right = .25, top = 1)
+
+ggsave("figures/rf_figure.png",  height = 7, width = 6, dpi=500)
 
 #partial dependence plots, for each month
 for (i in 1:12) {
@@ -514,8 +508,8 @@ for (i in 1:12) {
   
   explainer_rf <- explain_tidymodels(
     rf_fit, 
-    data = dplyr::select(this_month[[2]], -Log_f_CH4), 
-    y = this_month[[2]]$Log_f_CH4,
+    data = dplyr::select(this_month[[2]], -Log_CH4mean), 
+    y = this_month[[2]]$Log_CH4mean,
     label = "random forest")
   
   pdp_rf <- model_profile(explainer_rf, N = 5000)
@@ -527,20 +521,21 @@ for (i in 1:12) {
   
 }
 
+#remove some extreme values and sort by importance from the VI
 pdp_months_plot <- pdp_months %>% 
-  rename(Variable = `_vname_`, x=`_x_`, y_hat = `_yhat_`, month=`this_month[[1]]`) %>%
+  dplyr::select(Variable = `_vname_`, x=`_x_`, y_hat = `_yhat_`, month=`this_month[[1]]`) %>%
   right_join(vi_monthly, by=c("Variable", "month")) %>%
-  mutate(#y_hat = ifelse(Variable == "T_CEC_SOIL" & x > 60, NA, y_hat),
-         #y_hat = ifelse(Variable == "Log_k_month" & y_hat > -.6, NA, y_hat),
-         #y_hat = ifelse(Variable == "sresp_month" & y_hat > -.7, NA, y_hat),
+  mutate(y_hat = ifelse(Variable == "T_CEC_SOIL" & x > 60, NA, y_hat),
+         y_hat = ifelse(Variable == "Log_k_month" & y_hat > -.6, NA, y_hat),
+         y_hat = ifelse(Variable == "sresp_month" & y_hat > -.7, NA, y_hat),
          month= fct_relevel(month, levels = tolower(month.abb)),
          label=fct_relevel(label, levels(vi_monthly_mean$label))) %>% 
-  drop_na(y_hat)
+  drop_na(y_hat) 
 
 pdp_months_plot %>% 
   ggplot(aes(x, y_hat))+
   geom_line(alpha=.7, aes(color=month))+
-  geom_smooth(method="gam", color="black", se=FALSE)+
+  geom_smooth(method="loess", color="black", se=FALSE)+
   scale_color_viridis_d()+
   facet_wrap(~label, scales = "free")+
   theme_classic()+
@@ -548,7 +543,8 @@ pdp_months_plot %>%
   theme(strip.text = ggtext::element_markdown())
 
 
-ggsave(filename= "figures/partial_depend_flux_monthly.png", width = 12, height = 8, dpi=600)
+ggsave(filename= "figures/partial_depend_monthly.png", width = 12, height = 8, dpi=600)
+
 
 # 3. Predict values to the whole world ----
 
@@ -562,10 +558,10 @@ global_preds <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE)
 
 
 vars_to_log_glob <-  global_preds %>% 
-  select(contains(c('q_', "uparea", "popdens", "slop",  "T_OC" ,"T_CACO3", "T_CASO4", "k_", "gw_", "wetland",   "T_ESP",
+  select(contains(c("uparea", "popdens", "slop",  "T_OC" ,"T_CACO3", "T_CASO4", "k_", "q_", "gw_", "wetland",   "T_ESP",
                     "N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture", "P_gnpp", 
                     "P_background", "P_load", "P_point", "P_surface_runoff_agri", "P_surface_runoff_nat", "N_retention_subgrid"),
-                  ignore.case = FALSE), -wetland_cover) %>%
+                  ignore.case = FALSE), -wetland_cover, -slope) %>%
   colnames(.)
 
 
@@ -591,27 +587,77 @@ colnames(global_preds_trans)
 rm(global_preds, grimeDB_attributes)
 gc()
 
-predict_methane <- function(all_models, month, global_predictors) {
+
+
+predict_methane <- function(data_model, month, global_predictors, m_res) {
+  
+  #select adjacent months for each month
+  months_selected <- c(month - 1, month, month + 1)
+  if(month == 1){ months_selected <- c(12, 1, 2) }
+  if(month == 12){ months_selected <- c(11, 12, 1) }
+  
+  #now keep those data from the dataframe
+  df <- data_model_monthly %>%
+    filter(month %in% all_of(months_selected)) %>% 
+    dplyr::select(-month)
+  
+  split <- initial_split(df)
+  train_df <- training(split)
+  test_df <- testing(split)
+  
+  
+  for (i in 1:m_res ){
+    print(i)
+  train_sub <- slice_sample(train_df, prop = .8)
+  
+  #create recipe
+  recipe_train <- train_sub %>% 
+    recipe(Log_CH4mean ~ . )
+  
+  #fit workflow on train data
+  fit_wf <- wf %>%
+    add_recipe(recipe_train) %>%
+    fit(data = train_sub) 
+  
+
   all_months <- tolower(month.abb)
   
   month_selected <- all_months[month]
   
-  model_month <- all_models$model_fit[[month]]
-  
-  df_predictors <- global_predictors %>%
+  df_predictors <- global_preds_trans %>%
     select(-ends_with(setdiff(all_months, month_selected))) %>%
     rename_all(~ str_replace(., month_selected, "month"))
   
-  #df_baked <- workflows::extract_recipe(model_month) %>% 
-  # bake(df_predictors) 
   
-  out <- predict(model_month, df_predictors)
+  preds <- predict(fit_wf, df_predictors)
+  colnames(preds) <- paste( "s", i, sep="_")
   
-  colnames(out) <- paste( month.abb[month],  "fch4", sep="_")
-  out
+  if(i == 1){ preds_all <- preds } else { preds_all <- cbind(preds_all, preds) }
+
+  }
+  
+  data_out <- preds_all %>% 
+    as.data.frame() %>%  
+    mutate(across(everything(),  ~ exp(.x) - .1 )) %>% 
+    rowwise() %>% 
+    mutate( mean = mean(c_across(everything()), na.rm = TRUE),
+            sd = sd(c_across(everything()), na.rm = TRUE), 
+            ci_2.5 = mean - 0.95 * sd / m_res, 
+            ci_97.5 = mean + 0.95 * sd / m_res,
+            .keep = "none" ) %>% 
+    rename_at(vars(everything()),  ~ paste0(month.abb[month], "_" , . ) )
+  
+  
+  
+  done <- "done!"
+  
+  out %>% 
+  write_csv(paste0("data/processed/meth_preds/ch4_pred_uncertainity_", month.abb[month], ".csv" ))
+  
+  return(done)
 }
 
-ch4_jan <- predict_methane(monthly_models, 1, global_preds_trans)
+ch4_jan <- predict_methane(data_model_monthly, 1, global_preds_trans)
 ch4_feb <- predict_methane(monthly_models, 2, global_preds_trans)
 ch4_mar <- predict_methane(monthly_models, 3, global_preds_trans)
 ch4_apr <- predict_methane(monthly_models, 4, global_preds_trans)
@@ -632,7 +678,7 @@ dat_out <- global_preds_trans %>% select(COMID) %>%
             ch4_jul, ch4_aug, ch4_sep, ch4_oct, ch4_nov, ch4_dec) %>% 
   mutate(across(ends_with("ch4"), ~exp(.x)-.1))
 
-dat_out %>% summarise(across(everything(), mean))
+dat_out %>% summarise(across(everything(), median))
 
 dat_out %>% 
   pivot_longer(-COMID, values_to = "ch4", names_to = "month") %>% 
@@ -642,7 +688,7 @@ dat_out %>%
   scale_x_log10(labels=scales::number)
 
 
-write_csv(dat_out, "data/processed/meth_flux_predictions.csv")
+write_csv(dat_out, "data/processed/meth_predictions.csv")
 
 drive_upload(media = "data/processed/meth_predictions.csv",
              path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/meth_predictions.csv",

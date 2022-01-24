@@ -376,13 +376,19 @@ shapes_rivers <- shape_files[grepl("riv", shape_files)]
 list_shapes <- lapply(shapes_rivers, st_read)
 
 grades <-  do.call(what = sf:::rbind.sf, args=list_shapes) %>% st_set_crs(4326)
+rm(list_shapes)
+gc()
 
 grades_properties <- grades %>% 
   mutate(start_point = st_startpoint(.),
          lon = sf::st_coordinates(start_point)[,1],
          lat = sf::st_coordinates(start_point)[,2]) %>% 
   st_drop_geometry() %>% 
-  dplyr::select(COMID, Length, slope=Slope, uparea=USContArea,, lat, lon)
+  mutate(subarea =ifelse( USLINKNO1 == -1, DSContArea, DSContArea - USContArea)/10000 ) %>% 
+  dplyr::select(COMID, Length, slope=Slope, uparea=DSContArea, subarea, lat, lon)
+
+sum(grades_properties$subarea)
+
 
 write_csv(grades_properties, "data/raw/gis/GRADES_attributes/grades_lat_lon.csv")
 

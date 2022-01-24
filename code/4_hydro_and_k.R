@@ -24,25 +24,24 @@ lapply(package_list, require, character.only = TRUE)
 
 
 #read coordinates from grades
-grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
-  select(COMID, lon, lat)
+grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_lat_lon.csv") %>% 
+  select(COMID, lon, lat, subarea)
 
 #read hydrobasin 
 hydroBasinID <-
   read_csv("data/raw/gis/upscaling_vars/comidHydrobasin4.csv",
            col_types = 'ic')
 
-hydroBasinID <- hydroBasinID[!(hydroBasinID$HYBAS_ID %in% c('0')), ]
-
-hydroBasinID_nobasin %>% filter(HYBAS_ID == "0")
+hydroBasinID <- hydroBasinID %>% filter(HYBAS_ID != "0")
 
 hydroBasinID_nobasin <-
   read_csv("data/raw/gis/upscaling_vars/comidHydrobasin4_noBasin.csv",
            col_types = 'ic')
 
-hydroBasinID_nobasin <-
-  hydroBasinID_nobasin[!(hydroBasinID_nobasin$HYBAS_ID %in% c('0')), ]
+hydroBasinID_nobasin <-  hydroBasinID_nobasin %>% filter(HYBAS_ID != "0")
+
 hydroBasinID <- rbind(hydroBasinID, hydroBasinID_nobasin)
+
 rm(hydroBasinID_nobasin)
 
 hydroBasinSN <-  read_csv("data/raw/gis/upscaling_vars/hydrobasin4_hemisNS.csv", col_types = 'cc')
@@ -60,9 +59,7 @@ rm(hydroBasinFR_1)
 #ann q stat extractor
 qAnnStatsExt<-function(nc,statsNm){
   qStats<-ncvar_get(nc,statsNm)
-  qStats[qStats < 0.000000001]=0.000000001
-  #qStats<-data.frame(qStats)
-  #colnames(qStats)<-statsNm
+  qStats[qStats < 0.000000001] = 0.000000001
   if (nrow(qStats) == nrow(dbf)){
     return(qStats)
   } else {print('number of rows do not match ...')}
@@ -71,16 +68,16 @@ qAnnStatsExt<-function(nc,statsNm){
 #monthly q stats extractor
 qStatsExt <- function(nc,statsNm){
   qStats <- ncvar_get(nc, statsNm)
-  qStats[qStats < 0.000000001]=0.000000001
+  qStats[qStats < 0.000000001] = 0.000000001
   qStats <- data.frame(qStats)
   colnames(qStats) <- paste0(month.abb,statsNm) 
-  if (nrow(qStats) == nrow(dbf)){
+  if (nrow(qStats) == nrow(dbf) ){
     return(qStats)
   } else {print('number of rows do not match ...')}
 }
 
 #air-water temperature transformer
-airwaterT<-function(ta){tw=0.67*ta+7.45}
+airwaterT <- function(ta){ tw = 0.67*ta + 7.45}
 
 
 for (i in 1:8) {
@@ -214,10 +211,12 @@ print( k %>%
     left_join(temp, by= 'COMID')
   
   if(i==1){
-    df<-dbf
-  } else {df<-rbind(df,dbf)}
+    df <- dbf
+  } else { df <- rbind(df,dbf)}
 
 }
+
+df <- df %>% left_join(grades %>% select(COMID, subarea))
 
 #saving the results
 write_csv(df,'data/processed/q_and_k.csv')
