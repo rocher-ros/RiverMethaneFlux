@@ -320,14 +320,6 @@ data_model_monthly <- grimeDB_attr_trans %>%
 
 set.seed(123)
 
-#Run the model for each month in a map
-# monthly_models <- data_model_monthly %>%
-#   mutate(month_label = tolower(month.abb[month]),
-#          model_out = map(data, possibly(predict_RF_grime, otherwise = NA))) %>% 
-#   rowwise() %>%
-#   mutate( preds = model_out[1],
-#     model_fit = model_out[2]) %>% 
-#   select(-data, -model_out)
 
 # Now finally run the model for each month, using data of adjacent months for each month
 # First make a pointer of the data to use for each months, overlapping, 
@@ -547,9 +539,11 @@ pdp_months_plot %>%
 ggsave(filename= "figures/partial_depend_monthly.png", width = 12, height = 8, dpi=600)
 
 
-# 3. Predict values to the whole world ----
+# 3. ASSESSMENT OF SPATIAL EXTRAPOLATION ----
+# This is done by looking at the coverage of sampled sites relative to the high-dimensional space of spatial predictors
 
-#read data of all predictors globally for all COMIDS, to do the predictions
+
+#First read data of all predictors globally for all COMIDS, And transform it as the observations df
 
 drive_download( file="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attributes.csv",
                 path="data/processed/grade_attributes.csv",
@@ -571,9 +565,8 @@ vars_to_remove <-  global_preds %>%
                      'npp_', 'forest',  'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
                      'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY", "temp",
                     "N_aquaculture", "N_gnpp", "N_load", "N_point", "N_surface_runoff_agri", "N_surface_runoff_nat"),
-                  ignore.case = FALSE), lat, lon, slope, area) %>%
+                  ignore.case = FALSE), lat, lon, slope, area, -temp_yr) %>%
   colnames(.)
-
 
 
 #do same transformations to the global dataset
@@ -588,105 +581,99 @@ colnames(global_preds_trans)
 rm(global_preds, grimeDB_attributes)
 gc()
 
-# ASSESSMENT OF EXTRAPOLATION ----
+# 
 
-names_glob <- global_preds_trans %>% 
-  dplyr::select(-ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "aug", "sep", "oct", "nov", "dec")),
-                -COMID) %>% 
-  rename_all(~ str_replace(., "jul", "month")) %>% colnames() 
-
-names_train <- data_model_monthly %>% dplyr::select(-c(month, Log_CH4mean)) %>% colnames()
+#for some of the monthly variables, we use only july. Label which sites we have observations and which we dont
+df_together <- global_preds_trans %>% 
+  dplyr::select(-ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "aug", "sep", "oct", "nov", "dec"))) %>% 
+  mutate(type = ifelse(COMID %in% grimeDB_attr_trans$COMID, "sampled", "world")) 
 
 
-setdiff(names_glob, names_train)
-
-# PCA of the training data
-pca_training <- prcomp(data_model_monthly %>% dplyr::select(-c(month, Log_CH4mean)),
-             center = FALSE,
-             scale. = FALSE)
+# We do a PCA of the global dataset
+pca_all <- df_together %>% 
+  dplyr::select(-COMID, -type) %>% 
+  scale() %>% 
+  prcomp()
 
 
 #25 axis to get to 90% of variation
-summary(pca_training)
+summary(pca_all)
 
-# PCA of the global data
-pca_world <- prcomp(global_preds_trans %>% 
-                      dplyr::select(-ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "aug", "sep", "oct", "nov", "dec")),
-                                    -COMID),
-                       center = FALSE,
-                       scale. = FALSE)
+#List of the PCs
+ev_pca <- pca_all %>%
+  tidy(matrix = "eigenvalues")
 
-summary(pca_world)
+#recover the original database, byt only the columns we care, COMIDS and whether are sampeld or not.
+pca_df <- pca_all %>%
+  augment(df_together) %>%
+  dplyr::select(COMID, type, starts_with(".fitted"))
 
-df_pca_training = data.frame(PCA1 = pca_training$x[,"PC1"],
-                             PCA2 = pca_training$x[,"PC2"],
-                             PCA3 = pca_training$x[,"PC3"])
+#Save the PCs that we want, the ones that give us 90% of the variaiton
+selected_pcas <- ev_pca %>% 
+  filter(cumulative < 0.9) %>% 
+  mutate(PC_rep = PC) 
 
-df_pca_world = data.frame(PCA1 = pca_world$x[,"PC1"],
-                          PCA2 = pca_world$x[,"PC2"],
-                          PCA3 = pca_world$x[,"PC3"])
+#make a vector of all possible combinations
+combinations <- selected_pcas %>% 
+  expand(crossing(PC, PC_rep)) %>% 
+  filter(PC != PC_rep)
 
-ggplot()+
-  stat_density_2d(data=df_pca_world, aes(PCA1, PCA2, alpha = ..level..), geom = "polygon", bins = 4)+
-  geom_point(data=df_pca_training, aes(PCA1, PCA2), alpha=.5, color= "red3")
+#prepare an empty df to save results
+dat_out <- tibble(COMID = df_together$COMID,
+                  obs = 0)
 
+#do you want to plot each plane?
+plot_the_space = FALSE
 
-
-
-
-predict_methane <- function(all_models, month, global_predictors) {
-  all_months <- tolower(month.abb)
+#now we do a loop to run it for all combinations of PC axis, (600)
+for(i in 1:length(combinations$PC)){
   
-  month_selected <- all_months[month]
+PC_to_select <- c(paste0(".fittedPC", combinations$PC[i]), paste0(".fittedPC", combinations$PC_rep[i]) )
+
+pca_df_selected <- pca_df %>% 
+  dplyr::select(COMID, type, all_of(PC_to_select)) 
+
+colnames(pca_df_selected) <- c("COMID", "type", "PC_x", "PC_y")
+
+#make a hull of the sampled locations, to characterize the space represented in the samples
+hull <- pca_df_selected %>% 
+  filter(type == "sampled") %>%
+  slice(chull(PC_x, PC_y))
+
+# mark which sites are inside or outside the hull, in this given plane
+points_in_hull <- sp::point.in.polygon(pca_df_selected$PC_x, pca_df_selected$PC_y, hull$PC_x, hull$PC_y )
+points_in_hull <- if_else(points_in_hull >= 1, 1, 0)
+
+#make a plot, optional
+if(plot_the_space == TRUE){
   
-  model_month <- all_models$model_fit[[month]]
-
-   df_predictors <- global_predictors %>%
-     select(-ends_with(setdiff(all_months, month_selected))) %>%
-     rename_all(~ str_replace(., month_selected, "month"))
-   
-   #df_baked <- workflows::extract_recipe(model_month) %>% 
-    # bake(df_predictors) 
-   
-   out <- predict(model_month, df_predictors)
-
-  colnames(out) <- paste( month.abb[month],  "ch4", sep="_")
-  out
+ ggplot()+
+   geom_hex(data = pca_df_selected %>% filter(type == "world"), 
+            aes(PC_x, PC_y))+
+   geom_polygon(data = hull, aes(PC_x, PC_y), alpha = 0.4, , color= "red3")+
+   geom_point(data = pca_df_selected %>% filter(type == "sampled"), 
+              aes(PC_x, PC_y), alpha=.5, color= "red3")+
+   scale_fill_viridis_c()+
+   theme_classic()+
+   labs(x = paste(PC_to_select[1]), y = paste(PC_to_select[2]),
+        title= paste(PC_to_select[1], "x", PC_to_select[2]))
+  ggsave(paste0( "figures/PCAs_examples/", PC_to_select[1], "x", PC_to_select[2], ".png") )
 }
 
-ch4_jan <- predict_methane(monthly_models, 1, global_preds_trans)
-ch4_feb <- predict_methane(monthly_models, 2, global_preds_trans)
-ch4_mar <- predict_methane(monthly_models, 3, global_preds_trans)
-ch4_apr <- predict_methane(monthly_models, 4, global_preds_trans)
-ch4_may <- predict_methane(monthly_models, 5, global_preds_trans)
-ch4_jun <- predict_methane(monthly_models, 6, global_preds_trans)
-ch4_jul <- predict_methane(monthly_models, 7, global_preds_trans)
-ch4_aug <- predict_methane(monthly_models, 8, global_preds_trans)
-ch4_sep <- predict_methane(monthly_models, 9, global_preds_trans)
-ch4_oct <- predict_methane(monthly_models, 10, global_preds_trans)
-ch4_nov <- predict_methane(monthly_models, 11, global_preds_trans)
-ch4_dec <- predict_methane(monthly_models, 12, global_preds_trans)
+#update the file
+dat_out <- dat_out %>%
+  mutate(obs = obs + points_in_hull)
 
-ggplot(ch4_jan)+
-  geom_density(aes((Jan_ch4)))
+print(i)
 
-dat_out <- global_preds_trans %>% select(COMID) %>% 
-  bind_cols(ch4_jan, ch4_feb, ch4_mar, ch4_apr, ch4_may, ch4_jun,
-            ch4_jul, ch4_aug, ch4_sep, ch4_oct, ch4_nov, ch4_dec) %>% 
-  mutate(across(ends_with("ch4"), ~exp(.x)-.1))
+}
 
-dat_out %>% summarise(across(everything(), median))
 
 dat_out %>% 
-  pivot_longer(-COMID, values_to = "ch4", names_to = "month") %>% 
-ggplot()+
-  geom_density(aes(ch4))+
-  facet_wrap(~month)+
-  scale_x_log10(labels=scales::number)
+  mutate(interpolated = obs/600) %>% 
+  dplyr::select(-obs) %>% 
+  write_csv("data/processed/interpolated_COMIDS.csv")
 
+ggplot(dat_out, aes(x=obs/600*100))+
+  geom_density()
 
-write_csv(dat_out, "data/processed/meth_predictions.csv")
-
-drive_upload(media = "data/processed/meth_predictions.csv",
-             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/meth_predictions.csv",
-             overwrite = TRUE)
