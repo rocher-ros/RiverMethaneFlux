@@ -19,14 +19,21 @@ lapply(package_list, require, character.only = TRUE)
 
 # 1. Load files ----
 #upscaled methane fluxes
-meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes_with_mountains.csv", lazy = FALSE) 
+meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) %>% 
+  select(-contains("sd"))
 
 #upscaled methane concentrations
-meth_concs <- read_csv("data/processed/meth_predictions.csv") 
+#mean estimates are "month_ch4", while SD are "month_ch4_sd"
+meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "ch4_preds_uncertainty", full.names = TRUE), read_csv) %>% 
+  purrr::reduce(left_join, by = "COMID") %>% 
+  rename_with( ~str_replace(.x, "mean", "ch4")) %>% 
+  rename_with( ~str_replace(.x, "sd", "ch4_sd"))
+
+
 
 #read coordinates from grades
-grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_lat_lon.csv") %>% 
-  dplyr::select(-Length, -slope, -uparea)
+grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  dplyr::select(COMID, lon=lon_mid, lat = lat_mid, subarea)
 
 #read extrapolated areas
 extrap_areas <- read_csv("data/processed/interpolated_COMIDS.csv") %>% 
@@ -49,10 +56,10 @@ gc()
 meth_avg <- meth_gis %>% 
   drop_na(Jan_ch4F) %>% 
   rowwise() %>% 
-  mutate( ch4_mean = mean(Jan_ch4:Dec_ch4, na.rm= TRUE),
-          Fch4_mean = mean(Jan_ch4F:Dec_ch4F, na.rm= TRUE),
-          area_mean = mean(Jan_area_m2:Dec_area_m2, na.rm= TRUE)/1e+6) %>% 
-  select(COMID, lon, lat, ch4_mean, Fch4_mean, area_mean, runoff = runoffFL) %>%
+  mutate( ch4_mean = mean(Jan_ch4:Dec_ch4, na.rm = TRUE),
+          Fch4_mean = mean(Jan_ch4F:Dec_ch4F, na.rm = TRUE),
+          area_mean = mean(Jan_area_m2:Dec_area_m2, na.rm = TRUE)/1e+6) %>% 
+  select(COMID:lat, ch4_mean, Fch4_mean, area_mean, runoff = runoffFL, Jan_ch4F:Dec_ch4F) %>%
   st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
   st_transform("+proj=eqearth +wktext") 
 
@@ -88,6 +95,30 @@ meth_hexes_avg <- meth_hexes %>%
   group_by(index) %>%
   summarise(ch4_mean = mean(ch4_mean, na.rm = TRUE),
             Fch4_mean = mean(Fch4_mean, na.rm = TRUE),
+            Jan_ch4 = mean(Jan_ch4, na.rm = TRUE),
+            Feb_ch4 = mean(Feb_ch4, na.rm = TRUE),
+            Mar_ch4 = mean(Mar_ch4, na.rm = TRUE),
+            Apr_ch4 = mean(Apr_ch4, na.rm = TRUE),
+            May_ch4 = mean(May_ch4, na.rm = TRUE),
+            Jun_ch4 = mean(Jun_ch4, na.rm = TRUE),
+            Jul_ch4 = mean(Jul_ch4, na.rm = TRUE),
+            Aug_ch4 = mean(Aug_ch4, na.rm = TRUE),
+            Sep_ch4 = mean(Sep_ch4, na.rm = TRUE),
+            Oct_ch4 = mean(Oct_ch4, na.rm = TRUE),
+            Nov_ch4 = mean(Nov_ch4, na.rm = TRUE),
+            Dec_ch4 = mean(Dec_ch4, na.rm = TRUE),
+            Jan_ch4F = mean(Jan_ch4F, na.rm = TRUE),
+            Feb_ch4F = mean(Feb_ch4F, na.rm = TRUE),
+            Mar_ch4F = mean(Mar_ch4F, na.rm = TRUE),
+            Apr_ch4F = mean(Apr_ch4F, na.rm = TRUE),
+            May_ch4F = mean(May_ch4F, na.rm = TRUE),
+            Jun_ch4F = mean(Jun_ch4F, na.rm = TRUE),
+            Jul_ch4F = mean(Jul_ch4F, na.rm = TRUE),
+            Aug_ch4F = mean(Aug_ch4F, na.rm = TRUE),
+            Sep_ch4F = mean(Sep_ch4F, na.rm = TRUE),
+            Oct_ch4F = mean(Oct_ch4F, na.rm = TRUE),
+            Nov_ch4F = mean(Nov_ch4F, na.rm = TRUE),
+            Dec_ch4F = mean(Dec_ch4F, na.rm = TRUE),
             runoff = mean(runoff, na.rm = TRUE),
             area = sum(area_mean, na.rm = TRUE)) %>%
   st_sf()  
@@ -122,24 +153,62 @@ buffers <- meth_hexes_avg %>%
  
 
 #shrink the hexes by river area or runoff
-meth_hexes_avg2 <- meth_hexes_avg %>%
+meth_hexes_avg <- meth_hexes_avg %>%
   st_drop_geometry() %>%
   right_join(grid, by="index") %>%
   st_sf() %>% 
   st_buffer( dist = buffers$buffer_change)
 
-extrap_pols <- extrap_areas %>%
-  filter(interpolated < 0.75) %>% 
+
+for(Mon in month.abb){
+
+extrap_mon <- extrap_areas %>%
+  select(int = contains(all_of(Mon))) %>% 
+  filter( int < 0.9) %>% 
   st_cast("MULTIPOINT") %>% 
-  #st_cast("POLYGON") %>% 
-  st_buffer( dist = 1000 )
+  st_buffer( dist = 10000 ) %>% 
+  st_cast("MULTIPOLYGON")
+
+#find which polygons are intersecting, to simplify geometries
+g = st_intersects(extrap_mon, extrap_mon)
+
+G = graph_from_adj_list(g)
+
+clusters_id =  components(G)
+
+pols_merged <- extrap_mon %>% 
+  mutate(cluster_id = clusters_id$membership) %>% 
+  group_by(cluster_id) %>% 
+  summarise(geometry = st_union(geometry)) %>% 
+  mutate(Month = Mon) 
+
+
+#combining results
+if( Mon == 'Jan'){extrap_pols  <- pols_merged} else {extrap_pols  <- rbind(extrap_pols ,pols_merged)}
+
+print(paste("done", Mon))
+
+}
+
+
+
+
+
+
+meth_hexes_avg %>% 
+  st_transform(crs = 4326 ) %>% 
+  st_write( "data/processed/GIS/meth_hexes.shp", delete_layer = TRUE)
+
+extrap_pols %>% 
+  st_transform(crs = 4326 ) %>% 
+  st_write( "data/processed/GIS/extrap_sites.shp", delete_layer = TRUE)
 
 ## map of concentrations ----
 map_ch4 <- ggplot() +
   geom_sf(
-    data = meth_hexes_avg2, color = NA,
+    data = meth_hexes_avg, color = NA,
     aes( fill = ch4_mean) )+
- # geom_sf(data = extrap_pols, fill="blue3")+
+  geom_sf(data = pols_merged, fill="blue3", color = NA, alpha=.5)+
  # geom_sf(data=mountains, fill="gray20", size=.08, alpha=.1, color="gray20" )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   scale_fill_viridis_c(
@@ -156,14 +225,14 @@ map_ch4 <- ggplot() +
         legend.key.height  = unit(.5, 'cm'),
         legend.key.width =  unit(.3, 'cm'))
 
-#ggsave(map_ch4, filename = "figures/map_ch4.png", dpi=600, height = 10, width = 16)
+ggsave(map_ch4, filename = "figures/map_ch4_extrapJul.png", dpi=600, height = 10, width = 16)
 
 
 ## map of fluxes ----
 map_fch4 <- 
   ggplot()+
   geom_sf(
-    data = meth_hexes_avg2, 
+    data = meth_hexes_avg, 
     aes(fill = Fch4_mean*16/12), color = NA )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   #geom_sf(data=mountains, fill="gray20", size=.08, alpha=.1, color="gray20" )+

@@ -38,7 +38,7 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 # 2. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
 #    Thermogenically affected, Ditches
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
-  filter(`Aggregated?` == "No",
+  filter(`Aggregated?` == "No", distance_snapped < 50000,
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
   mutate( month=month(date)) %>% 
   dplyr::select( COMID, Site_Nid, CH4mean, month, GPP_yr:month, 
@@ -46,6 +46,8 @@ grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attribut
              temp_month, WaterTemp_actual, WaterTemp_est, discharge_measured)) 
 
 colnames(grimeDB_attributes)
+
+
   
 labeller_vars <- read_csv("data/processed/variables_names.csv") %>% 
   mutate(label=str_replace(label, "9", ";"))
@@ -414,7 +416,7 @@ ggplot( aes(x=Importance,
   stat_summary(fun.data = median_se, geom = "linerange", size=1.5, alpha=.6)+
   scale_x_continuous(expand = c(0,0))+
   #scale_y_discrete(position = "right")+
-  scale_fill_manual(values=c("forestgreen", "dodgerblue3", "brown3", "darkgoldenrod3", "gray60", "chocolate"), name="Category")+
+  scale_fill_manual(values=c("forestgreen", "dodgerblue3", "brown3",  "gray60", "chocolate"), name="Category")+ #"darkgoldenrod3"
   theme_classic()+
   labs(y="", fill="Category")+
   theme(legend.position = c(.8,.15), axis.text.y =ggtext::element_markdown(), legend.title =element_text(face="bold") )
@@ -422,7 +424,7 @@ ggplot( aes(x=Importance,
 ggsave(vi_plot, filename = "figures/VIP_scores_monthly.png", height = 8, width = 6, dpi=500)
 
 
-## run the data on the whole dataset, not nesting by month ----
+## run the data on the whole dataset, not nesting by month. This is to do PDPs ----
 
 set.seed(123)
 
@@ -581,99 +583,161 @@ colnames(global_preds_trans)
 rm(global_preds, grimeDB_attributes)
 gc()
 
+
 # 
+assess_spatial_extrapolation <- function(df_sampled, df_global, month, plot_the_space){
 
-#for some of the monthly variables, we use only july. Label which sites we have observations and which we dont
-df_together <- global_preds_trans %>% 
-  dplyr::select(-ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "aug", "sep", "oct", "nov", "dec"))) %>% 
-  mutate(type = ifelse(COMID %in% grimeDB_attr_trans$COMID, "sampled", "world")) 
-
-
-# We do a PCA of the global dataset
-pca_all <- df_together %>% 
-  dplyr::select(-COMID, -type) %>% 
-  scale() %>% 
-  prcomp()
-
-
-#25 axis to get to 90% of variation
-summary(pca_all)
-
-#List of the PCs
-ev_pca <- pca_all %>%
-  tidy(matrix = "eigenvalues")
-
-#recover the original database, byt only the columns we care, COMIDS and whether are sampeld or not.
-pca_df <- pca_all %>%
-  augment(df_together) %>%
-  dplyr::select(COMID, type, starts_with(".fitted"))
-
-#Save the PCs that we want, the ones that give us 90% of the variaiton
-selected_pcas <- ev_pca %>% 
-  filter(cumulative < 0.9) %>% 
-  mutate(PC_rep = PC) 
-
-#make a vector of all possible combinations
-combinations <- selected_pcas %>% 
-  expand(crossing(PC, PC_rep)) %>% 
-  filter(PC != PC_rep)
-
-#prepare an empty df to save results
-dat_out <- tibble(COMID = df_together$COMID,
-                  obs = 0)
-
-#do you want to plot each plane?
-plot_the_space = FALSE
-
-#now we do a loop to run it for all combinations of PC axis, (600)
-for(i in 1:length(combinations$PC)){
+    
+  #select adjacent months for each month
+  months_selected <- c(month - 1, month, month + 1)
+  if(month == 1){ months_selected <- c(12, 1, 2) }
+  if(month == 12){ months_selected <- c(11, 12, 1) }
   
-PC_to_select <- c(paste0(".fittedPC", combinations$PC[i]), paste0(".fittedPC", combinations$PC_rep[i]) )
-
-pca_df_selected <- pca_df %>% 
-  dplyr::select(COMID, type, all_of(PC_to_select)) 
-
-colnames(pca_df_selected) <- c("COMID", "type", "PC_x", "PC_y")
-
-#make a hull of the sampled locations, to characterize the space represented in the samples
-hull <- pca_df_selected %>% 
-  filter(type == "sampled") %>%
-  slice(chull(PC_x, PC_y))
-
-# mark which sites are inside or outside the hull, in this given plane
-points_in_hull <- sp::point.in.polygon(pca_df_selected$PC_x, pca_df_selected$PC_y, hull$PC_x, hull$PC_y )
-points_in_hull <- if_else(points_in_hull >= 1, 1, 0)
-
-#make a plot, optional
-if(plot_the_space == TRUE){
+  #now keep those data from the dataframe
+  df <- grimeDB_attr_trans %>%
+    filter(month %in% all_of(months_selected)) 
   
- ggplot()+
-   geom_hex(data = pca_df_selected %>% filter(type == "world"), 
-            aes(PC_x, PC_y))+
-   geom_polygon(data = hull, aes(PC_x, PC_y), alpha = 0.4, , color= "red3")+
-   geom_point(data = pca_df_selected %>% filter(type == "sampled"), 
-              aes(PC_x, PC_y), alpha=.5, color= "red3")+
-   scale_fill_viridis_c()+
-   theme_classic()+
-   labs(x = paste(PC_to_select[1]), y = paste(PC_to_select[2]),
-        title= paste(PC_to_select[1], "x", PC_to_select[2]))
-  ggsave(paste0( "figures/PCAs_examples/", PC_to_select[1], "x", PC_to_select[2], ".png") )
+  all_months <- tolower(month.abb)
+  
+  month_selected <- all_months[month]
+  
+  #select only the month we need and make new columns for where we have observations or not
+  df_together <- df_global %>%
+    select(-ends_with(setdiff(all_months, month_selected))) %>%
+    rename_all(~ str_replace(., month_selected, "month")) %>% 
+    mutate(type = ifelse(COMID %in% df$COMID, "sampled", "world")) 
+  
+  
+  # We do a PCA of the global dataset
+  pca_all <- df_together %>% 
+    dplyr::select(-COMID, -type) %>% 
+    scale() %>% 
+    prcomp()
+  
+  
+  #25 axis to get to 90% of variation
+  summary(pca_all)
+  
+  #List of the PCs
+  ev_pca <- pca_all %>%
+    tidy(matrix = "eigenvalues")
+  
+  #recover the original database, but only the columns we care, COMIDS and whether are sampled or not.
+  pca_df <- pca_all %>%
+    augment(df_together) %>%
+    dplyr::select(COMID, type, starts_with(".fitted"))
+  
+  #Save the PCs that we want, the ones that give us 90% of the variation
+  selected_pcas <- ev_pca %>% 
+    filter(cumulative < 0.8) %>% 
+    mutate(PC_rep = PC) 
+  
+  #make a vector of all possible combinations
+  combinations <- selected_pcas %>% 
+    expand(crossing(PC, PC_rep)) %>% 
+    filter(PC != PC_rep)
+  
+  #prepare an empty df to save results
+  dat_out <- tibble(COMID = df_together$COMID,
+                    obs = 0)
+  
+  
+  
+  #now we do a loop to run it for all combinations of PC axis, (600)
+  for(i in 1:length(combinations$PC)){
+    
+  PC_to_select <- c(paste0(".fittedPC", combinations$PC[i]), paste0(".fittedPC", combinations$PC_rep[i]) )
+  
+  pca_df_selected <- pca_df %>% 
+    dplyr::select(COMID, type, all_of(PC_to_select)) 
+  
+  colnames(pca_df_selected) <- c("COMID", "type", "PC_x", "PC_y")
+  
+  #make a hull of the sampled locations, to characterize the space represented in the samples
+  hull <- pca_df_selected %>% 
+    filter(type == "sampled") %>%
+    slice(chull(PC_x, PC_y))
+  
+  # mark which sites are inside or outside the hull, in this given plane
+  points_in_hull <- sp::point.in.polygon(pca_df_selected$PC_x, pca_df_selected$PC_y, hull$PC_x, hull$PC_y )
+  points_in_hull <- if_else(points_in_hull >= 1, 1, 0)
+  
+  #make a plot of the space, optional parameter
+  if(plot_the_space == TRUE){
+    
+   ggplot()+
+     geom_hex(data = pca_df_selected %>% filter(type == "world"), 
+              aes(PC_x, PC_y))+
+     geom_polygon(data = hull, aes(PC_x, PC_y), alpha = 0.4, , color= "red3")+
+     geom_point(data = pca_df_selected %>% filter(type == "sampled"), 
+                aes(PC_x, PC_y), alpha=.5, color= "red3")+
+     scale_fill_viridis_c()+
+     theme_classic()+
+     labs(x = paste(PC_to_select[1]), y = paste(PC_to_select[2]),
+          title= paste(PC_to_select[1], "x", PC_to_select[2]))
+    ggsave(paste0( "figures/PCAs_examples/", PC_to_select[1], "x", PC_to_select[2], ".png") )
+  }
+  
+  #update the file
+  dat_out <- dat_out %>%
+    mutate(obs = obs + points_in_hull)
+  
+  print(paste("done ",i ,"of", length(combinations$PC) ))
+  
+  
+  }
+  
+  dat_out <- dat_out %>% 
+    mutate(interp_month = obs/length(combinations$PC)) %>% 
+    dplyr::select(-obs) %>% 
+    rename_at(vars(interp_month),  ~ str_replace(. , "month", month.abb[month] ) ) 
+  
+ return(dat_out)
+
 }
 
-#update the file
-dat_out <- dat_out %>%
-  mutate(obs = obs + points_in_hull)
 
-print(i)
+jan_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 1, plot_the_space = FALSE)
+feb_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 2, plot_the_space = FALSE)
+mar_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 3, plot_the_space = FALSE)
+apr_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 4, plot_the_space = FALSE)
+may_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 5, plot_the_space = FALSE)
+jun_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 6, plot_the_space = FALSE)
+jul_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 7, plot_the_space = FALSE)
+aug_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 8, plot_the_space = FALSE)
+sep_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 9, plot_the_space = FALSE)
+oct_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 10, plot_the_space = FALSE)
+nov_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 11, plot_the_space = FALSE)
+dec_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 12, plot_the_space = FALSE)
 
-}
+jan_extrap %>% 
+  summarise(sum(interp_Jan > .8)/n())
+
+extrap_monthly <- jan_extrap %>% 
+  left_join(feb_extrap, by = "COMID") %>% 
+  left_join(mar_extrap, by = "COMID") %>% 
+  left_join(apr_extrap, by = "COMID") %>% 
+  left_join(may_extrap, by = "COMID") %>% 
+  left_join(jun_extrap, by = "COMID") %>% 
+  left_join(jul_extrap, by = "COMID") %>% 
+  left_join(aug_extrap, by = "COMID") %>% 
+  left_join(sep_extrap, by = "COMID") %>% 
+  left_join(oct_extrap, by = "COMID") %>% 
+  left_join(nov_extrap, by = "COMID") %>% 
+  left_join(dec_extrap, by = "COMID")  
 
 
-dat_out %>% 
-  mutate(interpolated = obs/600) %>% 
-  dplyr::select(-obs) %>% 
-  write_csv("data/processed/interpolated_COMIDS.csv")
+  ggplot( aes(x=frac_int, fill=month))+
+  geom_density() 
 
-ggplot(dat_out, aes(x=obs/600*100))+
-  geom_density()
+  extrap_monthly %>% 
+    pivot_longer(-COMID, values_to = "frac_int", names_to = "month") %>% 
+    group_by(month) %>% 
+    summarise(per_above.8 = sum(frac_int >= .9) / n() )
+  
+  
+  
+write_csv(extrap_monthly, "data/processed/interpolated_COMIDS.csv")
+
+
 

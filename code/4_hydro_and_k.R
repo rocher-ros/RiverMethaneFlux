@@ -24,21 +24,15 @@ lapply(package_list, require, character.only = TRUE)
 
 
 #read coordinates from grades
-grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_lat_lon.csv") %>% 
-  select(COMID, lon, lat, subarea)
+grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  select(COMID, lon= lon_mid, lat = lat_mid, subarea)
 
 #read hydrobasin 
-hydroBasinID <-
-  read_csv("data/raw/gis/upscaling_vars/comidHydrobasin4.csv",
-           col_types = 'ic')
+hydroBasinID <- read_csv("data/raw/gis/upscaling_vars/comidHydrobasin4.csv", col_types = 'ic') %>% 
+  filter(HYBAS_ID != "0")
 
-hydroBasinID <- hydroBasinID %>% filter(HYBAS_ID != "0")
-
-hydroBasinID_nobasin <-
-  read_csv("data/raw/gis/upscaling_vars/comidHydrobasin4_noBasin.csv",
-           col_types = 'ic')
-
-hydroBasinID_nobasin <-  hydroBasinID_nobasin %>% filter(HYBAS_ID != "0")
+hydroBasinID_nobasin <- read_csv("data/raw/gis/upscaling_vars/comidHydrobasin4_noBasin.csv", col_types = 'ic') %>% 
+  filter(HYBAS_ID != "0")
 
 hydroBasinID <- rbind(hydroBasinID, hydroBasinID_nobasin)
 
@@ -186,28 +180,31 @@ k <- vel %>%
     dplyr::select(COMID, Slope, ends_with(c("V", "Sc", "eD"), ignore.case = FALSE),
                   -starts_with("yea")) %>% 
     pivot_longer(-c(COMID, Slope), names_to = c("month", ".value"), names_sep = "_") %>% 
-    mutate(k = case_when(Slope <= 0.01 | eD <= 0.02 ~ (2841 * Slope * V +2.02) / (600/Sc)^0.5,
-                         eD > 0.02 ~  exp(1.18*log(eD)+6.43)*(600/Sc)^0.5),
-           k = ifelse(is.na(k) == TRUE, .3, k)              
-           ) %>%
+    mutate(k = (2841 * Slope * V +2.02) / (600/Sc)^0.5,#case_when(Slope <= 0.01 | eD <= 0.02 ~ (2841 * Slope * V +2.02) / (600/Sc)^0.5,
+                #         eD > 0.02 ~  exp(1.18*log(eD)+6.43)*(600/Sc)^0.5),
+           k = ifelse(is.na(k) == TRUE, .3, k) ) %>%
   dplyr::select(COMID, month, k) %>% 
   pivot_wider(names_from = "month", values_from = k, names_glue = "{month}_{.value}")
+
+k_sd <- vel %>% 
+  dplyr::select(COMID, Slope, ends_with(c("V", "Sc", "eD"), ignore.case = FALSE),
+                -starts_with("yea")) %>% 
+  pivot_longer(-c(COMID, Slope), names_to = c("month", ".value"), names_sep = "_") %>% 
+  mutate(k_sd = (107 * Slope * V + 0.209) / (600/Sc)^0.5         
+  ) %>%
+  dplyr::select(COMID, month, k_sd) %>% 
+  pivot_wider(names_from = "month", values_from = k_sd, names_glue = "{month}_{.value}")
   
 
 print("min K")
 print(k %>% 
   summarise(across(Jan_k:Dec_k, min)))
 
-print("NAs")
-print( k %>% 
-  summarise(across(Jan_k:Dec_k, ~sum(is.na(.x))))
-)
 
-
-  
   #join k and temp
   dbf <- dbf %>% 
     left_join(k, by= 'COMID') %>% 
+    left_join(k_sd, by= 'COMID') %>% 
     left_join(temp, by= 'COMID')
   
   if(i==1){
@@ -218,8 +215,16 @@ print( k %>%
 
 df <- df %>% left_join(grades %>% select(COMID, subarea))
 
+names(df)
+
+ggplot(df)+
+  geom_density(aes(x=Aug_k_sd))+
+  scale_x_log10()
+
 #saving the results
-write_csv(df,'data/processed/q_and_k.csv')
+df %>% 
+  select(-ends_with("Ta")) %>% 
+  write_csv('data/processed/q_and_k.csv')
 
 #upload to drive
 drive_upload(media = "data/processed/q_and_k.csv",
