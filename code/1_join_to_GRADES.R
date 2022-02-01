@@ -2,6 +2,7 @@
 # List of all packages needed
 package_list <- c('tidyverse', 'RCurl', 'sf', 'XML', 'countrycode', 'leaflet', 'googledrive', 'lwgeom')
 
+
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
 
@@ -59,9 +60,12 @@ drive_download(
 #load the methane DB 
 load(file.path("data", "raw", "MethDB_tables_converted.rda"))
 
+
 #select the sites, and make a new column to get the continent name. This will be the way to break the processing in pieces
-sites_meth <- gis_df %>% 
-  dplyr::select(Site_Nid, lat, lon, elevation_m =z_m_combined, country=countries_sub) %>%
+sites_meth <- sites_df %>%  
+  mutate(lat = ifelse(is.na(lat_new) == TRUE, Latitude, lat_new),
+         lon = ifelse(is.na(lon_new) == TRUE, Longitude, lon_new)) %>% 
+  dplyr::select(Site_Nid, lat, lon, country=Country) %>%
   drop_na(lat) %>% 
   mutate(continent =  countrycode(sourcevar = country,
                                   origin = "country.name",
@@ -73,11 +77,13 @@ sites_meth <- gis_df %>%
                                Site_Nid %in% 12164 ~ "Asia",
                                Site_Nid %in% 7428 ~ "Americas",
                                Site_Nid %in% 8581 ~ "Africa",
+                               country %in% c("Scotland", "England") ~ "Europe",
+                               country == "Bangaladesh" ~ "Asia",
                                TRUE ~ continent)) %>% 
   st_as_sf( coords = c("lon", "lat"), crs = 4326)
 
 #check if there are some without continent
-sites_meth %>% filter(is.na(continent) == TRUE) 
+sites_meth %>% filter(is.na(continent) == TRUE) %>% print(n=60)
 
 
 #get the files than end in .shp, and separate them in catchments and networks
@@ -119,15 +125,14 @@ distance_snapped <- st_distance(sites_in_africa, africa[nearest,], by_element = 
 
 summary(distance_snapped)
 
-#g et the snapped COMID and ancillary variables 
+#get the snapped COMID and ancillary variables 
 sites_in_africa <- sites_in_africa %>% 
   mutate(COMID = africa[nearest,]$COMID,
-         lengthkm = africa[nearest,]$lengthkm,
-         sinuosity = africa[nearest,]$sinuosity,
-         slope_grades = africa[nearest,]$slope,
-         uparea = africa[nearest,]$uparea,
-         order = africa[nearest,]$order,
-         NextDownID = africa[nearest,]$NextDownID, 
+         lengthkm = africa[nearest,]$Length,
+         slope_grades = africa[nearest,]$Slope,
+         uparea = africa[nearest,]$DSContArea,
+         order = africa[nearest,]$strmOrder,
+         NextDownID = africa[nearest,]$DSLINKNO, 
          distance_snapped = distance_snapped) 
 
 
@@ -171,12 +176,11 @@ summary(distance_snapped)
 #get the snapped COMID and ancillary variables 
 sites_in_europe <- sites_in_europe %>% 
   mutate(COMID = europe[nearest,]$COMID,
-         lengthkm = europe[nearest,]$lengthkm,
-         sinuosity = europe[nearest,]$sinuosity,
-         slope_grades = europe[nearest,]$slope,
-         uparea = europe[nearest,]$uparea,
-         order = europe[nearest,]$order,
-         NextDownID = europe[nearest,]$NextDownID, 
+         lengthkm = europe[nearest,]$Length,
+         slope_grades = europe[nearest,]$Slope,
+         uparea = europe[nearest,]$DSContArea,
+         order = europe[nearest,]$strmOrder,
+         NextDownID = europe[nearest,]$DSLINKNO, 
          distance_snapped = distance_snapped) 
 
 #launch a leaflet with the sites, to see how it went
@@ -203,10 +207,10 @@ rm(asia_north, asia_south)
 sites_in_asia <- sites_meth %>% filter(continent %in% "Asia")
 
 #to double check, plot 1000 of the sites randomly selected
-sample_n(asia, 2000) %>% 
+sample_n(asia, 10000) %>% 
   ggplot()+
   geom_sf()+
-  geom_sf(data=sites_meth, color="blue")+
+  #geom_sf(data=sites_meth, color="blue")+
   geom_sf(data=sites_in_asia, color="red")
 
 #find the nearest GRADES network
@@ -222,12 +226,11 @@ summary(distance_snapped)
 #get the snapped COMID and ancillary variables 
 sites_in_asia <- sites_in_asia %>% 
   mutate(COMID = asia[nearest,]$COMID,
-         lengthkm = asia[nearest,]$lengthkm,
-         sinuosity = asia[nearest,]$sinuosity,
-         slope_grades = asia[nearest,]$slope,
-         uparea = asia[nearest,]$uparea,
-         order = asia[nearest,]$order,
-         NextDownID = asia[nearest,]$NextDownID, 
+         lengthkm = asia[nearest,]$Length,
+         slope_grades = asia[nearest,]$Slope,
+         uparea = asia[nearest,]$DSContArea,
+         order = asia[nearest,]$strmOrder,
+         NextDownID = asia[nearest,]$DSLINKNO, 
          distance_snapped = distance_snapped) 
 
 
@@ -235,7 +238,7 @@ sites_in_asia <- sites_in_asia %>%
 #there is a measure tool (top right), sou you can look at coordinates, distance and area if needed
 leaflet() %>% 
   addProviderTiles("Esri.WorldImagery") %>% 
-  addPolylines(data= asia[nearest,],#europe %>%st_crop(xmin=10, xmax=20, ymin=55, ymax=59), 
+  addPolylines(data= asia[nearest,],
                label = ~COMID,
                color= "blue") %>% 
   addCircles(data= sites_in_asia, label = ~Site_Nid,
@@ -270,12 +273,11 @@ summary(distance_snapped)
 #get the snapped COMID and ancillary variables 
 sites_in_oceania <- sites_in_oceania %>% 
   mutate(COMID = oceania[nearest,]$COMID,
-         lengthkm = oceania[nearest,]$lengthkm,
-         sinuosity = oceania[nearest,]$sinuosity,
-         slope_grades = oceania[nearest,]$slope,
-         uparea = oceania[nearest,]$uparea,
-         order = oceania[nearest,]$order,
-         NextDownID = oceania[nearest,]$NextDownID, 
+         lengthkm = oceania[nearest,]$Length,
+         slope_grades = oceania[nearest,]$Slope,
+         uparea = oceania[nearest,]$DSContArea,
+         order = oceania[nearest,]$strmOrder,
+         NextDownID = oceania[nearest,]$DSLINKNO, 
          distance_snapped = distance_snapped) 
 
 
@@ -324,12 +326,11 @@ summary(distance_snapped)
 #get the snapped COMID and ancillary variables 
 sites_in_america <- sites_in_america %>% 
   mutate(COMID = america[nearest,]$COMID,
-         lengthkm = america[nearest,]$lengthkm,
-         sinuosity = america[nearest,]$sinuosity,
-         slope_grades = america[nearest,]$slope,
-         uparea = america[nearest,]$uparea,
-         order = america[nearest,]$order,
-         NextDownID = america[nearest,]$NextDownID, 
+         lengthkm = america[nearest,]$Length,
+         slope_grades = america[nearest,]$Slope,
+         uparea = america[nearest,]$DSContArea,
+         order = america[nearest,]$strmOrder,
+         NextDownID = america[nearest,]$DSLINKNO, 
          distance_snapped = distance_snapped) 
 
 
@@ -381,17 +382,24 @@ gc()
 
 grades_properties <- grades %>% 
   mutate(start_point = st_startpoint(.),
-         lon = sf::st_coordinates(start_point)[,1],
-         lat = sf::st_coordinates(start_point)[,2]) %>% 
+         mid_point = st_point_on_surface(.),
+         end_point = st_endpoint(.),
+         lon_start = sf::st_coordinates(start_point)[,1],
+         lat_start = sf::st_coordinates(start_point)[,2],
+         lon_mid = sf::st_coordinates(mid_point)[,1],
+         lat_mid = sf::st_coordinates(mid_point)[,2],
+         lon_end = sf::st_coordinates(end_point)[,1],
+         lat_end = sf::st_coordinates(end_point)[,2]) %>% 
   st_drop_geometry() %>% 
   mutate(subarea =ifelse( USLINKNO1 == -1, DSContArea, DSContArea - USContArea)/10000 ) %>% 
-  dplyr::select(COMID, Length, slope=Slope, uparea=DSContArea, subarea, lat, lon)
+  dplyr::select(COMID, Length, slope=Slope, uparea=DSContArea, subarea, lat_start, lon_start, 
+                lat_mid, lon_mid, lat_end, lon_end)
 
 sum(grades_properties$subarea)
 
 
-write_csv(grades_properties, "data/raw/gis/GRADES_attributes/grades_lat_lon.csv")
+write_csv(grades_properties, "data/raw/gis/GRADES_attributes/grades_coords.csv")
 
 # upload the csv file to google drive
-drive_upload(media = "data/raw/gis/GRADES_attributes/grades_lat_lon.csv" ,
+drive_upload(media = "data/raw/gis/GRADES_attributes/grades_coords.csv" ,
              path = "SCIENCE/PROJECTS/RiverMethaneFlux/gis/grades_coords.csv")

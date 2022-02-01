@@ -165,7 +165,7 @@ colnames(mountains)
 
 #read coordinates from grades
 grades_latlon <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
-  dplyr::select(COMID, lat, lon, slope)
+  dplyr::select(COMID, lat =lat_mid, lon=lon_mid, slope)
 
 nutrients_water %>% 
   summarise(across(everything(), ~sum(is.na(.x)))) %>% 

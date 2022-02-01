@@ -19,7 +19,7 @@ lapply(package_list, require, character.only = TRUE)
 
 # 1. Load files ----
 #upscaled methane fluxes
-meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) 
+meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes_with_mountains.csv", lazy = FALSE) 
 
 #upscaled methane concentrations
 meth_concs <- read_csv("data/processed/meth_predictions.csv") 
@@ -28,6 +28,12 @@ meth_concs <- read_csv("data/processed/meth_predictions.csv")
 grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_lat_lon.csv") %>% 
   dplyr::select(-Length, -slope, -uparea)
 
+#read extrapolated areas
+extrap_areas <- read_csv("data/processed/interpolated_COMIDS.csv") %>% 
+  left_join(grades %>% dplyr::select(COMID, lat, lon)) %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
+  st_transform("+proj=eqearth +wktext") 
+
 #join it into one file 
 meth_gis <- meth_concs %>% 
   left_join( grades, by = "COMID") %>%
@@ -35,7 +41,6 @@ meth_gis <- meth_concs %>%
 
 rm(grades, meth_concs, meth_fluxes)
 gc()
-
 
 # 2. Maps ----
 # Firs we need some data processing
@@ -123,11 +128,19 @@ meth_hexes_avg2 <- meth_hexes_avg %>%
   st_sf() %>% 
   st_buffer( dist = buffers$buffer_change)
 
+extrap_pols <- extrap_areas %>%
+  filter(interpolated < 0.75) %>% 
+  st_cast("MULTIPOINT") %>% 
+  #st_cast("POLYGON") %>% 
+  st_buffer( dist = 1000 )
+
 ## map of concentrations ----
 map_ch4 <- ggplot() +
   geom_sf(
     data = meth_hexes_avg2, color = NA,
     aes( fill = ch4_mean) )+
+ # geom_sf(data = extrap_pols, fill="blue3")+
+ # geom_sf(data=mountains, fill="gray20", size=.08, alpha=.1, color="gray20" )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
@@ -153,7 +166,7 @@ map_fch4 <-
     data = meth_hexes_avg2, 
     aes(fill = Fch4_mean*16/12), color = NA )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
- # geom_sf(data=mountains, fill=NA,  alpha=.3, color="gray20" )+
+  #geom_sf(data=mountains, fill="gray20", size=.08, alpha=.1, color="gray20" )+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
    # trans = "pseudo_log", 
@@ -172,7 +185,7 @@ map_fch4 <-
 
 maps_combined <- map_ch4 / map_fch4
 
-ggsave(maps_combined, filename = "figures/fig_maps.png", dpi= 1000)
+ggsave(maps_combined, filename = "figures/fig_maps_w_mountains.png", dpi= 1000)
 # Figure of seasonal and latitudinal patterns 
 
 colnames(meth_gis)
