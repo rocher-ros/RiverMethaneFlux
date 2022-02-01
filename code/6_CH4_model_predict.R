@@ -57,7 +57,7 @@ drive_download( file="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attribut
 }
 
 #read the lobal predictors df
-global_preds <- fread( "data/processed/grade_attributes.csv") #read_csv( "data/processed/grade_attributes.csv", lazy=FALSE) 
+global_preds <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE) #fread( "data/processed/grade_attributes.csv") #
 
 
 
@@ -132,19 +132,6 @@ rf_mod <-
 wf <-
   workflow() %>%
   add_model(rf_mod)
-
-
-
-#prepare a dataset, nesting by month
-data_model_monthly <- grimeDB_attr_trans %>% 
-  group_by(COMID, month) %>% 
-  summarise(across(everything(), mean)) %>%
-  ungroup() %>% 
-  dplyr::select(-all_of(variables_to_remove)) %>% 
-  drop_na()
-
-
-set.seed(123)
 
 
 # 3. Function to predict values to the whole world ----
@@ -231,7 +218,7 @@ set.seed(123)
 
 
 ch4_jan <- predict_methane(data_model_monthly, 1, global_preds_trans, n_boot)
-
+gc()
 ch4_feb <- predict_methane(data_model_monthly, 2, global_preds_trans, n_boot)
 ch4_mar <- predict_methane(data_model_monthly, 3, global_preds_trans, n_boot)
 ch4_apr <- predict_methane(data_model_monthly, 4, global_preds_trans, n_boot)
