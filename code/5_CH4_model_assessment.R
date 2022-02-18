@@ -72,7 +72,7 @@ grimeDB_attr_trans <- grimeDB_attributes %>%
   rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
 
-#Do again some histograms with the log transformed variables
+#Do  some histograms with the log transformed variables
 # some variables are still very skewed, usually the anthropogenic predictors that have lots of 0s
 grimeDB_attr_trans %>% 
   select(-all_of(variables_to_remove)) %>% 
@@ -274,7 +274,7 @@ rf_mod <-
     trees = 1200,
     min_n = 21 ) %>%
   set_mode("regression") %>%
-  set_engine("ranger", importance="impurity", num.threads =n.cores)#, quantreg = TRUE) #if getting quantiles
+  set_engine("ranger", importance="impurity", num.threads =n.cores)
 
 #prepare a workflow with it to feed into the function
 wf <-
@@ -351,29 +351,67 @@ monthly_models <- lst(
   select(-data, -model_out)
 
 #plot them  
-monthly_models %>% 
-  mutate(month_label= fct_relevel(month_label, levels = tolower(month.abb))) %>% 
-  unnest(preds) %>% 
-ggplot( aes(.pred, Log_CH4mean))+
+
+labelled_months <- tibble(month_label = tolower(month.abb), labels =month.name)
+
+monthly_models_unnested <- monthly_models %>% 
+  mutate(month_label= fct_relevel(month_label, levels = toupper(month.abb))) %>% 
+  unnest(preds)  %>% 
+  left_join(labelled_months, by = "month_label") %>% 
+  mutate(labels = fct_relevel(labels, month.name)) 
+
+rms_text <- monthly_models_unnested %>% 
+  group_by(labels) %>% 
+  summarise(rmse = exp(sqrt(mean((Log_CH4mean - .pred)^2)))-.1 ) %>% 
+  mutate(rms_label= paste("RMSE = ", round(rmse, 2) ))
+  
+ggplot(monthly_models_unnested, aes(exp(.pred), exp(Log_CH4mean)))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
-  stat_cor(aes(label = ..rr.label..), label.y.npc = 0.9)+ #put R2 and label
-  labs(x="CH4 predictions", y="CH4 observations", title="one model for each month")+
+  geom_text( data = rms_text,
+    mapping = aes(x = 20, y = .6, label =rms_label ))+
+  stat_cor(aes(label = ..rr.label..), label.y.npc = 0.1, label.x = 0.8)+ #put R2 and label
+  labs(x = "**CH<sub>4</sub> predictions**<br>(mmol m<sup>-3</sup>)", 
+       y = "**CH<sub>4</sub> observations** <br>(mmol m<sup>-3</sup>)")+
+  scale_y_log10(labels=scales::number, limits=c(0.1, 100))+
+  scale_x_log10(labels=scales::number, limits=c(0.1, 100))+
+  facet_wrap(~labels, ncol = 3)+
   theme_bw()+
-  facet_wrap(~month_label)
+  theme(axis.title.y = ggtext::element_markdown(),
+        axis.title.x = ggtext::element_markdown(),
+        strip.background = element_rect(fill="white"),
+        strip.text = element_text(size=12))
 
-#ggsave(filename= "figures/model_perf_monthly_adjacent.png", width = 12, height = 8)
+
+ggsave(filename= "figures/supplementary/model_perf_monthly.png", width = 9, height = 8)
+
+#residuals vs predictions
+ggplot(monthly_models_unnested, aes(.pred, Log_CH4mean-.pred))+
+  geom_point(alpha = .6)+
+  geom_hline(yintercept = 0, linetype = 1)+
+  geom_smooth(method="lm", se = FALSE, linetype = 2, color = "red")+
+  labs(x = "**CH<sub>4</sub> predictions**<br>log(mmol m<sup>-3</sup>)", 
+       y = "**Residuals** <br>log(mmol m<sup>-3</sup>)")+
+  facet_wrap(~labels, ncol = 3)+
+  theme_bw()+
+  theme(axis.title.y = ggtext::element_markdown(),
+        axis.title.x = ggtext::element_markdown(),
+        strip.background = element_rect(fill="white"),
+        strip.text = element_text(size=12))
+
+
+ggsave(filename= "figures/supplementary/model_residuals_monthly.png", width = 9, height = 8)
 
 #residuals
-monthly_models %>% 
-  unnest(preds) %>%  
-  ggplot( aes(.pred, Log_CH4mean-.pred))+
-  geom_point()+
-  #geom_smooth(method="lm")+
-  geom_hline(yintercept = 0)+
-  labs(x="CH4 predictions", y="Residuals")+
-  theme_bw()
-
+ggplot(monthly_models_unnested, aes( x=Log_CH4mean-.pred))+
+  geom_density(alpha = .6, fill= "gray60")+
+  labs( x = "**Residuals** <br>log(mmol m<sup>-3</sup>)")+
+  facet_wrap(~labels, ncol = 3)+
+  theme_bw()+
+  theme(axis.title.y = ggtext::element_markdown(),
+        axis.title.x = ggtext::element_markdown(),
+        strip.background = element_rect(fill="white"),
+        strip.text = element_text(size=12))
 
 #variable importance 
 get_vi_vals <- function(data){
@@ -389,7 +427,8 @@ vi_monthly <- map(monthly_models[[3]], get_vi_vals)  %>%
   left_join(labeller_vars, by=c("Variable" = "var")  )  %>%
   group_by(Variable) %>% 
   filter(median(Importance)> 21.5) %>%
-  ungroup() 
+  ungroup() %>% 
+  mutate(type = str_replace(type, "Biogeochemical", "Biological"))
 
 vi_monthly_mean <- vi_monthly %>% 
   group_by(Variable) %>% 
@@ -421,7 +460,7 @@ ggplot( aes(x=Importance,
   labs(y="", fill="Category")+
   theme(legend.position = c(.8,.15), axis.text.y =ggtext::element_markdown(), legend.title =element_text(face="bold") )
 
-ggsave(vi_plot, filename = "figures/VIP_scores_monthly.png", height = 8, width = 6, dpi=500)
+#ggsave(vi_plot, filename = "figures/VIP_scores_monthly.png", height = 8, width = 6, dpi=500)
 
 
 ## run the data on the whole dataset, not nesting by month. This is to do PDPs ----
@@ -430,7 +469,7 @@ set.seed(123)
 
 #Run the model for each month in a map
 yearly_model <- grimeDB_attr_trans %>%
-  group_by(COMID, month) %>% 
+  group_by(COMID) %>% 
   summarise(across(everything(), mean)) %>%
   ungroup() %>% 
   select(-all_of(variables_to_remove)) %>% 
@@ -450,7 +489,7 @@ explainer_rf <- explain_tidymodels(
   label = "random forest"
 )
 
-pdp_rf <- model_profile(explainer_rf, N = 5000)
+pdp_rf <- model_profile(explainer_rf, N = NULL)
 
 pdp_data_plot <- pdp_rf$agr_profiles %>% 
   dplyr::select(Variable = `_vname_`, x=`_x_`, y_hat = `_yhat_`) %>%
@@ -461,10 +500,13 @@ pdp_data_plot <- pdp_rf$agr_profiles %>%
          y_hat = (y_hat - min(y_hat, na.rm = T))/(max(y_hat, na.rm = T) - min(y_hat, na.rm = T))) %>% 
   drop_na(y_hat) 
 
+
+
+### Figure VIP+ partial dependence
 pdp_plot <- pdp_data_plot %>% 
   ggplot(aes(x, y_hat, color=type))+
   geom_line(size=1)+
-  scale_color_manual(values=c("darkgreen", "dodgerblue4", "brown4", "darkgoldenrod4", "gray40", "chocolate4"))+
+  scale_color_manual(values=c("darkgreen", "dodgerblue4", "brown4", "gray40", "chocolate4"))+
   facet_grid( scales = "free", rows=vars(label))+
   theme_classic()+
   labs(x="", y="") +
@@ -489,57 +531,18 @@ vi_plot + inset_element(pdp_plot, left = -.088, bottom = -.034, right = .25, top
 ggsave("figures/rf_figure.png",  height = 7, width = 6, dpi=500)
 
 
-
-
-#partial dependence plots, for each month
-for (i in 1:12) {
-  
-  print(i) 
-  
-  this_month <- lapply(monthly_models, `[[`, i)  
-  
-  rf_fit <- this_month[[3]] %>% 
-    fit(data = this_month[[2]])
-  
-  explainer_rf <- explain_tidymodels(
-    rf_fit, 
-    data = dplyr::select(this_month[[2]], -Log_CH4mean), 
-    y = this_month[[2]]$Log_CH4mean,
-    label = "random forest")
-  
-  pdp_rf <- model_profile(explainer_rf, N = 5000)
-  
-  data_out <- cbind(pdp_rf$agr_profiles, this_month[[1]] )
-  
-  if(i == 1){ pdp_months <- data_out } else{  pdp_months <- rbind(pdp_months, data_out)}
-
-
-}
-
-#remove some extreme values and sort by importance from the VI
-pdp_months_plot <- pdp_months %>% 
-  dplyr::select(Variable = `_vname_`, x=`_x_`, y_hat = `_yhat_`, month=`this_month[[1]]`) %>%
-  right_join(vi_monthly, by=c("Variable", "month")) %>%
-  mutate(y_hat = ifelse(Variable == "T_CEC_SOIL" & x > 60, NA, y_hat),
-         y_hat = ifelse(Variable == "Log_k_month" & y_hat > -.6, NA, y_hat),
-         y_hat = ifelse(Variable == "sresp_month" & y_hat > -.7, NA, y_hat),
-         month= fct_relevel(month, levels = tolower(month.abb)),
-         label=fct_relevel(label, levels(vi_monthly_mean$label))) %>% 
-  drop_na(y_hat) 
-
-pdp_months_plot %>% 
+##Figure only of the partial dependence 
+pdp_data_plot %>% 
   ggplot(aes(x, y_hat))+
-  geom_line(alpha=.7, aes(color=month))+
-  geom_smooth(method="loess", color="black", se=FALSE)+
-  scale_color_viridis_d()+
-  facet_wrap(~label, scales = "free")+
+  geom_line(size = 1)+
+  facet_wrap( ~label, ncol = 3, scales = "free")+
   theme_classic()+
-  guides(color = guide_legend(override.aes = list(size = 1, alpha=1) ) )+
-  theme(strip.text = ggtext::element_markdown())
+  labs(x = "", y = expression( hat(y) ))+
+  theme(strip.text =  ggtext::element_markdown() )
 
 
-ggsave(filename= "figures/partial_depend_monthly.png", width = 12, height = 8, dpi=600)
 
+ggsave(filename = "figures/supplementary/PDP_individual.png", height = 9, width = 8, dpi = 800)
 
 # 3. ASSESSMENT OF SPATIAL EXTRAPOLATION ----
 # This is done by looking at the coverage of sampled sites relative to the high-dimensional space of spatial predictors
