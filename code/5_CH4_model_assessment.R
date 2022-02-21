@@ -316,7 +316,7 @@ data_model_monthly <- grimeDB_attr_trans %>%
   group_by(COMID, month) %>% 
   summarise(across(everything(), mean)) %>%
   ungroup() %>% 
-  dplyr::select(-all_of(variables_to_remove)) %>% 
+  dplyr::select(-all_of(variables_to_remove), -biome_label) %>% 
   drop_na()
 
 
@@ -362,7 +362,7 @@ monthly_models_unnested <- monthly_models %>%
 
 rms_text <- monthly_models_unnested %>% 
   group_by(labels) %>% 
-  summarise(rmse = exp(sqrt(mean((Log_CH4mean - .pred)^2)))-.1 ) %>% 
+  summarise(rmse = exp(sqrt(mean((Log_CH4mean - .pred)^2))) - 0.1 ) %>% 
   mutate(rms_label= paste("RMSE = ", round(rmse, 2) ))
   
 ggplot(monthly_models_unnested, aes(exp(.pred), exp(Log_CH4mean)))+
@@ -389,7 +389,7 @@ ggsave(filename= "figures/supplementary/model_perf_monthly.png", width = 9, heig
 ggplot(monthly_models_unnested, aes(.pred, Log_CH4mean-.pred))+
   geom_point(alpha = .6)+
   geom_hline(yintercept = 0, linetype = 1)+
-  geom_smooth(method="lm", se = FALSE, linetype = 2, color = "red")+
+  geom_smooth( se = FALSE, linetype = 2, color = "red")+
   labs(x = "**CH<sub>4</sub> predictions**<br>log(mmol m<sup>-3</sup>)", 
        y = "**Residuals** <br>log(mmol m<sup>-3</sup>)")+
   facet_wrap(~labels, ncol = 3)+
@@ -426,7 +426,7 @@ vi_monthly <- map(monthly_models[[3]], get_vi_vals)  %>%
   map_df( ~as.data.frame(.x), .id="month") %>% 
   left_join(labeller_vars, by=c("Variable" = "var")  )  %>%
   group_by(Variable) %>% 
-  filter(median(Importance)> 21.5) %>%
+  filter(median(Importance)> 22.3) %>%
   ungroup() %>% 
   mutate(type = str_replace(type, "Biogeochemical", "Biological"))
 
@@ -455,12 +455,13 @@ ggplot( aes(x=Importance,
   stat_summary(fun.data = median_se, geom = "linerange", size=1.5, alpha=.6)+
   scale_x_continuous(expand = c(0,0))+
   #scale_y_discrete(position = "right")+
-  scale_fill_manual(values=c("forestgreen", "dodgerblue3", "brown3",  "gray60", "chocolate"), name="Category")+ #"darkgoldenrod3"
+  scale_fill_manual(values=c("forestgreen", "dodgerblue3","brown3", "darkgoldenrod3",   "gray60", "chocolate"), name="Category")+ #
   theme_classic()+
   labs(y="", fill="Category")+
   theme(legend.position = c(.8,.15), axis.text.y =ggtext::element_markdown(), legend.title =element_text(face="bold") )
 
-#ggsave(vi_plot, filename = "figures/VIP_scores_monthly.png", height = 8, width = 6, dpi=500)
+vi_plot
+
 
 
 ## run the data on the whole dataset, not nesting by month. This is to do PDPs ----

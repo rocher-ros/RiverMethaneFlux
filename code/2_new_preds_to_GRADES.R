@@ -496,6 +496,7 @@ nh4 <- terra::rast("data/raw/gis/fertilizer inputs/NH4_input_ver1.nc4")
 no3 <- terra::rast("data/raw/gis/fertilizer inputs/NO3_input_ver1.nc4")
 
 grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  mutate(lon = lon_mid, lat = lat_mid) %>% 
   st_as_sf( coords = c("lon", "lat"),  crs = 4326)
 
 nh4  <- terra::subst(nh4, c(NA, NaN), 0)
@@ -525,6 +526,7 @@ write_csv(dat_out, "data/raw/gis/GRADES_attributes/fertilizers.csv")
 sf::sf_use_s2(FALSE)
 
 grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  mutate(lon = lon_mid, lat = lat_mid) %>% 
   st_as_sf( coords = c("lon", "lat"),  crs = 4326)
 
 
@@ -542,3 +544,94 @@ data_out <- st_join(grades, mountains) %>%
 
 
 write_csv(data_out, "data/raw/gis/GRADES_attributes/mountains.csv")
+
+# Peatlands ----
+
+sf::sf_use_s2(FALSE)
+
+grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  mutate(lon = lon_mid, lat = lat_mid) %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326)
+
+
+peatlands <- terra::rast("data/raw/gis/peatlands/Peat-ML_global_peatland_extent.nc")
+
+plot(peatlands)
+
+peat_vals <- terra::extract( peatlands, st_coordinates(grades)) 
+
+dat_out <- tibble(COMID = grades$COMID, 
+                  peatland_cover = peat_vals$PEATLAND_P) %>% 
+  mutate(peatland_cover = ifelse(is.na(peatland_cover) == TRUE, 0, peatland_cover))
+
+summary(dat_out)
+
+
+write_csv(dat_out, "data/raw/gis/GRADES_attributes/peatlands.csv")
+
+# Peatlands ----
+sf::sf_use_s2(FALSE)
+
+grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  mutate(lon = lon_mid, lat = lat_mid) %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326)
+
+
+biomes <- read_sf("data/raw/gis/biomes/wwf_terr_ecos.shp") %>% 
+  mutate(biome_label = case_when(
+    BIOME == 1 ~ "Tropical & Subtropical Moist Broadleaf Forests",
+    BIOME == 2 ~ "Tropical & Subtropical Dry Broadleaf Forests",
+    BIOME == 3 ~ "Tropical & Subtropical Coniferous Forests",
+    BIOME == 4 ~ "Temperate Broadleaf & Mixed Forests",
+    BIOME == 5 ~ "Temperate Conifer Forests",
+    BIOME == 6 ~  "Boreal Forests/Taiga",
+    BIOME == 7 ~ "Tropical & Subtropical Grasslands, Savannas & Shrublands",
+    BIOME == 8 ~  "Temperate Grasslands, Savannas & Shrublands",
+    BIOME == 9 ~ "Flooded Grasslands & Savannas",
+    BIOME == 10 ~ "Montane Grasslands & Shrublands",
+    BIOME == 11 ~ "Tundra",
+    BIOME == 12 ~ "Mediterranean Forests, Woodlands & Scrub",
+    BIOME == 13 ~ "Deserts & Xeric Shrublands",
+    BIOME == 14 ~ "Mangroves",
+    TRUE ~ "other"
+  ))
+
+
+unique(biomes$biome_label) %>% sort()
+
+data_out <- st_join(grades, biomes) %>% 
+  dplyr::select(COMID, biome_num = BIOME, biome_label ) 
+
+#there are some missing sites 
+data_out %>% filter(is.na(biome_label) == TRUE)
+
+#all coastal sites are missing biome, we add the closest one
+data_out %>% filter(is.na(biome_label) == TRUE) %>% 
+  left_join(grades) %>% 
+  st_as_sf() %>% 
+ggplot()+
+  geom_sf()
+
+#we separate the completed ones with the missing ones
+biome_withdata <-  data_out %>% 
+  drop_na(biome_label) %>% 
+  st_sf()
+
+biome_missing <- data_out %>%
+  filter_all(any_vars(is.na(.))) %>% 
+  dplyr::select(COMID)  
+
+
+#find nearest point with data
+nearest <- st_nearest_feature(biome_missing, biomes)
+
+biome_filled <- cbind(biome_missing, st_drop_geometry(biomes)[nearest,]) %>% 
+  dplyr::select(COMID, biome_num = BIOME, biome_label )
+
+
+#join with both filled datasets
+biome_good <- bind_rows(biome_withdata %>% st_drop_geometry(), 
+                        biome_filled %>% st_drop_geometry())
+
+
+write_csv(biome_good, "data/raw/gis/GRADES_attributes/biomes.csv")

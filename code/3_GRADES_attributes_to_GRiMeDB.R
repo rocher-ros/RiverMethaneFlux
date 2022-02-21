@@ -162,6 +162,12 @@ colnames(fertilizers)
 mountains <- read_csv("data/raw/gis/GRADES_attributes/mountains.csv")
 colnames(mountains)
 
+peatlands <- read_csv("data/raw/gis/GRADES_attributes/peatlands.csv")
+colnames(peatlands)
+
+biomes <- read_csv("data/raw/gis/GRADES_attributes/biomes.csv") %>% dplyr::select(-biome_num)
+colnames(biomes)
+
 
 #read coordinates from grades
 grades_latlon <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
@@ -202,7 +208,7 @@ conc_df_comids <- conc_df %>%
 ## attach  COMID to the flux df and keep useful variables
 flux_df %>% 
   drop_na(Diffusive_CH4_Flux_Mean) %>% 
-  select(Site_Nid,Date_start,  Diffusive_CH4_Flux_Median, Diffusive_CH4_Flux_Mean ) %>% 
+  dplyr::select(Site_Nid,Date_start,  Diffusive_CH4_Flux_Median, Diffusive_CH4_Flux_Mean ) %>% 
   print(n=100)
 
 flux_df_comids <- flux_df %>% 
@@ -261,6 +267,8 @@ grades_attributes <-  annPP %>%
   left_join(footprint, by ="COMID") %>% 
   left_join(fertilizers, by ="COMID") %>% 
   left_join(mountains, by ="COMID") %>% 
+  left_join(peatlands, by ="COMID") %>% 
+  left_join(biomes, by ="COMID") %>% 
   drop_na(q_jan) %>% 
   distinct(COMID, .keep_all = TRUE)
 
@@ -274,9 +282,15 @@ grades_attributes %>%
 grades_attributes %>%
   filter(duplicated(.[["COMID"]])) %>% 
   arrange(COMID)  %>% print(n=100)
+
+grades_attributes %>% 
+  filter(is.na(biome_label )) %>% 
+  dplyr::select(COMID, lat, lon, biome_label ) %>% 
+  print(n=100)
+
          
 rm(annPP, eleSlope, gwTable, q_k, land, monPP, monTemp, popdens, prectemp, soilATT, sresp, 
-   uparea, wetland, gw_good)
+   uparea, wetland, gw_good, biomes, peatlands, mountains, fertilizers, nutrients_water)
 
 gc()
 
@@ -286,7 +300,13 @@ grades_attributes %>%
   rename_all( ~ str_replace(., "pRS", "sresp")) %>% 
   rename_all( ~ str_replace(., "prec", "precip")) %>% 
   rename(prec_yr = precip_yr) %>% 
-write_csv("data/processed/grade_attributes.csv")  
+write_csv("data/processed/grade_attributes.csv") 
+
+# grades_attributes %>% 
+#   rename_all( ~ str_replace(., "pRS", "sresp")) %>% 
+#   rename_all( ~ str_replace(., "prec", "precip")) %>% 
+#   rename(prec_yr = precip_yr) %>% 
+#   arrow::write_parquet("data/processed/grade_attributes.parquet", compression = "gzip", compression_level = 5)
 
 drive_upload(media = "data/processed/grade_attributes.csv",
              path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attributes.csv",

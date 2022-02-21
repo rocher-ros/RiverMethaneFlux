@@ -432,7 +432,13 @@ season_lat_plot +  inset_element(total_lats, left = .97, right = 1.4, bottom = -
 ggsave("figures/emissions_lat_season.png", width =8, height = 8, dpi = 800)
 
 
-
+seasonal_df_long %>% 
+  group_by(lat_label) %>% 
+  summarise(lat= mean(lat), 
+            total_flux= sum(ch4E)) %>% 
+  mutate(lat_label = fct_reorder(as_factor(lat_label), lat,  .desc = FALSE), 
+         total_flux_per = total_flux/sum(total_flux)*100) 
+  
 
 
 

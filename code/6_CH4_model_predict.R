@@ -147,7 +147,7 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
     filter(month %in% all_of(months_selected)) %>% 
     dplyr::select(-month)
   
-  split <- initial_split(df)
+  split <- initial_split(df, strata= biome)
   train_df <- training(split)
   test_df <- testing(split)
   

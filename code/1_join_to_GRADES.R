@@ -73,6 +73,7 @@ sites_meth <- sites_df %>%
          #this needed some manual fixing in some cases
          continent = case_when(lat > 45 & lon > 60 ~ "Asia",
                                lat < 4.7 & lon > 108 ~ "Oceania",
+                               lat < 1  & lon > 100 ~ "Oceania",
                                Site_Nid %in% c(2405, 9299, 9303) ~ "Europe",
                                Site_Nid %in% 12164 ~ "Asia",
                                Site_Nid %in% 7428 ~ "Americas",
@@ -207,7 +208,7 @@ rm(asia_north, asia_south)
 sites_in_asia <- sites_meth %>% filter(continent %in% "Asia")
 
 #to double check, plot 1000 of the sites randomly selected
-sample_n(asia, 10000) %>% 
+sample_n(asia, 5000) %>% 
   ggplot()+
   geom_sf()+
   #geom_sf(data=sites_meth, color="blue")+
@@ -257,7 +258,7 @@ sites_in_oceania <- sites_meth %>% filter(continent %in% "Oceania")
 sample_n(oceania, 2000) %>% 
   ggplot()+
   geom_sf()+
-  geom_sf(data=sites_meth, color="blue")+
+  #geom_sf(data=sites_meth, color="blue")+
   geom_sf(data=sites_in_oceania, color="red")
 
 #find the nearest GRADES network
@@ -310,8 +311,11 @@ sites_in_america <- sites_meth %>% filter(continent %in% "Americas")
 sample_n(america , 2000) %>% 
   ggplot()+
   geom_sf()+
-  geom_sf(data=sites_meth, color="blue")+
+  #geom_sf(data=sites_meth, color="blue")+
   geom_sf(data=sites_in_america, color="red")
+
+#there is one site in Hawai that snaps to the Auletian islands, I remove it
+sites_in_america <- sites_in_america %>% filter(!Site_Nid == "7352")
 
 #find the nearest GRADES network
 nearest <- st_nearest_feature(sites_in_america, america)
@@ -338,7 +342,7 @@ sites_in_america <- sites_in_america %>%
 #there is a measure tool (top right), sou you can look at coordinates, distance and area if needed
 leaflet() %>% 
   addProviderTiles("Esri.WorldImagery") %>% 
-  addPolylines(data= america[nearest,],#europe %>%st_crop(xmin=10, xmax=20, ymin=55, ymax=59), 
+  addPolylines(data= america[nearest,],
                label = ~COMID,
                color= "blue") %>% 
   addCircles(data= sites_in_america, label = ~Site_Nid,
@@ -367,7 +371,9 @@ sites_meth_comid %>%
   theme_bw()
 
 
-## last thing,  get point coordinates for all segments in grades 
+## last thing,  get point coordinates for all segments in grades
+
+
 files <- list.files("data/raw/grades")[grepl(".shp$", list.files("data/raw/grades"))]
 
 shape_files <- paste("data/raw/grades", files[grepl(".shp$", files)], sep="/") 
@@ -380,7 +386,7 @@ grades <-  do.call(what = sf:::rbind.sf, args=list_shapes) %>% st_set_crs(4326)
 rm(list_shapes)
 gc()
 
-grades_properties <- grades %>% 
+grades_properties <- grades[1:100,] %>% 
   mutate(start_point = st_startpoint(.),
          mid_point = st_point_on_surface(.),
          end_point = st_endpoint(.),
@@ -389,13 +395,12 @@ grades_properties <- grades %>%
          lon_mid = sf::st_coordinates(mid_point)[,1],
          lat_mid = sf::st_coordinates(mid_point)[,2],
          lon_end = sf::st_coordinates(end_point)[,1],
-         lat_end = sf::st_coordinates(end_point)[,2]) %>% 
+         lat_end = sf::st_coordinates(end_point)[,2] ) %>% 
   st_drop_geometry() %>% 
   mutate(subarea =ifelse( USLINKNO1 == -1, DSContArea, DSContArea - USContArea)/10000 ) %>% 
   dplyr::select(COMID, Length, slope=Slope, uparea=DSContArea, subarea, lat_start, lon_start, 
-                lat_mid, lon_mid, lat_end, lon_end)
+                lat_mid, lon_mid, lat_end, lon_end, continent)
 
-sum(grades_properties$subarea)
 
 
 write_csv(grades_properties, "data/raw/gis/GRADES_attributes/grades_coords.csv")
