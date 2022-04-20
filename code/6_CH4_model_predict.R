@@ -57,7 +57,7 @@ drive_download( file="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attribut
 }
 
 #read the lobal predictors df
-global_preds <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE) #fread( "data/processed/grade_attributes.csv") #
+global_preds <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE) 
 
 
 
@@ -73,10 +73,6 @@ variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S
                          "N_aquaculture", "N_gnpp", "N_load", "N_point",  "N_surface_runoff_agri", "N_surface_runoff_nat" )
 
 
-#dataset with some variables log transformed
-grimeDB_attr_trans <- grimeDB_attributes %>%
-  mutate(across(.cols=all_of(vars_to_log), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
-  rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
 vars_to_log_glob <-  global_preds %>% 
   select(contains(c("uparea", "popdens", "slop",  "T_OC" ,"T_CACO3", "T_CASO4", "k_", "q_", "gw_", "wetland",   "T_ESP",
@@ -95,6 +91,10 @@ vars_to_remove_glob <-  global_preds %>%
   colnames(.)
 
 
+#dataset with some variables log transformed
+grimeDB_attr_trans <- grimeDB_attributes %>%
+  mutate(across(.cols=all_of(vars_to_log), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
+  rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
 
 #do same transformations to the global dataset
@@ -126,7 +126,7 @@ rf_mod <-
     trees = 1200,
     min_n = 21 ) %>%
   set_mode("regression") %>%
-  set_engine("ranger", importance="impurity", num.threads =n.cores)#, quantreg = TRUE) #if getting quantiles
+  set_engine("ranger", num.threads =n.cores)
 
 #prepare a workflow with it to feed into the function
 wf <-
@@ -143,19 +143,24 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
   if(month == 12){ months_selected <- c(11, 12, 1) }
   
   #now keep those data from the dataframe
-  df <- data_model_monthly %>%
+  df <- data_model %>%
     filter(month %in% all_of(months_selected)) %>% 
     dplyr::select(-month)
   
-  split <- initial_split(df, strata= biome)
-  train_df <- training(split)
-  test_df <- testing(split)
+  #split <- initial_split(df) 
+  #train_df <- training(split)
+  #test_df <- testing(split)
   
-  preds_all <- tibble( COMID = global_preds_trans$COMID)
+  preds_all <- tibble( COMID = global_predictors$COMID)
   
   for (i in 1:m_res ){
     print(i)
-  train_sub <- slice_sample(train_df, prop = .8)
+  #train_sub <- slice_sample(train_df, prop = .8) 
+  
+  split <- initial_split(df, prop = .7, strata = biome_label) 
+  
+  train_sub <- training(split) %>% 
+    select(-biome_label)
   
   #create recipe
   recipe_train <- train_sub %>% 
@@ -171,7 +176,7 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
   
   month_selected <- all_months[month]
   
-  df_predictors <- global_preds_trans %>%
+  df_predictors <- global_predictors %>%
     select(-ends_with(setdiff(all_months, month_selected))) %>%
     rename_all(~ str_replace(., month_selected, "month"))
   
@@ -208,17 +213,18 @@ n_boot = 100
 #prepare a dataset, nesting by month
 data_model_monthly <- grimeDB_attr_trans %>% 
   group_by(COMID, month) %>% 
-  summarise(across(everything(), mean)) %>%
+  summarise(across(where(is.numeric), mean)) %>%
   ungroup() %>% 
-  dplyr::select(-all_of(variables_to_remove)) %>% 
-  drop_na()
+  dplyr::select(-all_of(variables_to_remove), COMID) %>% 
+  drop_na() %>% 
+  left_join(dplyr::select(grimeDB_attr_trans, COMID, biome_label)) %>% 
+  dplyr::select(-COMID)
 
 
 set.seed(123)
 
 
 ch4_jan <- predict_methane(data_model_monthly, 1, global_preds_trans, n_boot)
-gc()
 ch4_feb <- predict_methane(data_model_monthly, 2, global_preds_trans, n_boot)
 ch4_mar <- predict_methane(data_model_monthly, 3, global_preds_trans, n_boot)
 ch4_apr <- predict_methane(data_model_monthly, 4, global_preds_trans, n_boot)
@@ -232,37 +238,3 @@ ch4_nov <- predict_methane(data_model_monthly, 11, global_preds_trans, n_boot)
 ch4_dec <- predict_methane(data_model_monthly, 12, global_preds_trans, n_boot)
 
 
-data_out <- ch4_jan %>% 
-  as_tibble() %>%  
-  mutate(across(everything(),  ~ exp(.x) - .1 )) %>% 
-  rowwise() %>% 
-  mutate( mean = mean(c_across(everything()), na.rm = TRUE),
-          sd = sd(c_across(everything()), na.rm = TRUE), 
-          .keep = "none" ) %>% 
-  rename_at(vars(everything()),  ~ paste0(month.abb[month], "_" , . ) )
-
-
-
-ggplot(ch4_jan)+
-  geom_density(aes((Jan_ch4)))
-
-dat_out <- global_preds_trans %>% select(COMID) %>% 
-  bind_cols(ch4_jan, ch4_feb, ch4_mar, ch4_apr, ch4_may, ch4_jun,
-            ch4_jul, ch4_aug, ch4_sep, ch4_oct, ch4_nov, ch4_dec) %>% 
-  mutate(across(ends_with("ch4"), ~exp(.x)-.1))
-
-dat_out %>% summarise(across(everything(), median))
-
-dat_out %>% 
-  pivot_longer(-COMID, values_to = "ch4", names_to = "month") %>% 
-  ggplot()+
-  geom_density(aes(ch4))+
-  facet_wrap(~month)+
-  scale_x_log10(labels=scales::number)
-
-
-write_csv(dat_out, "data/processed/meth_predictions.csv")
-
-drive_upload(media = "data/processed/meth_predictions.csv",
-             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/meth_predictions.csv",
-             overwrite = TRUE)
