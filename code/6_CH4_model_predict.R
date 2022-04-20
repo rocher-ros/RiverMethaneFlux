@@ -6,7 +6,7 @@
 
 # 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', "data.table")
+package_list <- c('tidyverse', 'tidymodels', 'googledrive' , 'lubridate')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))

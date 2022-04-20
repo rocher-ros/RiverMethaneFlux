@@ -48,7 +48,8 @@ hydro_k <- read_csv("data/processed/q_and_k.csv")
 
 #upscaled methane concentrations
 #mean estimates are "month_ch4", while SD are "month_ch4_sd"
-meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "ch4_preds_uncertainty", full.names = TRUE), read_csv) %>% 
+meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "ch4_preds_uncertainty", full.names = TRUE), 
+                     read_csv) %>% 
   purrr::reduce(left_join, by = "COMID") %>% 
   rename_with( ~str_replace(.x, "mean", "ch4")) %>% 
   rename_with( ~str_replace(.x, "sd", "ch4_sd"))
@@ -527,7 +528,8 @@ main_stats <- df %>%
             mean = mean(flux, na.rm = TRUE),,
             median = median(flux, na.rm = TRUE),
             max = max(flux, na.rm = TRUE),
-            min = min(flux, na.rm = TRUE)) 
+            min = min(flux, na.rm = TRUE), 
+            q.95 = quantile(flux, 0.95, na.rm = TRUE)) 
 
 main_stats
 
@@ -654,14 +656,18 @@ names(total_fluxes)
 #now get the estimate. For that, do the sum of the measured + extrapolated fluxes, for all months
 total_fluxes %>% 
   select(COMID, ends_with(c("ch4E_extrap", "ch4E_reach"))) %>% 
-  pivot_longer(-COMID, values_to = "flux", names_to = "month_type") %>% 
+  pivot_longer(-COMID, values_to = "flux", names_to = "type") %>% 
+  mutate(type = str_remove(type, month.abb)) %>% 
+  group_by(type) %>% 
   summarise(total = sum(flux, na.rm = TRUE)/1e+12*16/12) #in TgCH4 / yr
 
 #sd propagated
 total_fluxes %>% 
   select(COMID, ends_with(c("ch4E_sd_extrap", "ch4E_sd_reach"))) %>% 
-  pivot_longer(-COMID, values_to = "flux", names_to = "month_type") %>% 
+  pivot_longer(-COMID, values_to = "flux", names_to = "type") %>%
   summarise(total =sum(flux, na.rm = TRUE)/1e+12*16/12) #in TgCH4 / yr
+
+
 
 
 total_fluxes %>% 

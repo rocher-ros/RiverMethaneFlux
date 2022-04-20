@@ -5,7 +5,7 @@
 
 # 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive' , 'sf',  'rnaturalearth', 'igraph')
+package_list <- c('tidyverse', 'googledrive' , 'sf',  'rnaturalearth')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -75,7 +75,7 @@ meth_avg <- meth_gis %>%
           ch4_sd = mean(Jan_ch4_sd:Dec_ch4_sd, na.rm = TRUE),
           ch4_cv = ch4_sd / ch4_mean * 100,
           Ech4_cv =mean(Jan_ch4F_cv:Dec_ch4F_cv, na.rm = TRUE) * 100 ) %>% 
-  dplyr::select(COMID:lat, ch4_mean, Fch4_mean, ch4_cv, Ech4_cv, runoff = runoffFL, 
+  dplyr::select(COMID:lat, ch4_mean, Fch4_mean, ch4_cv, Ech4_cv, runoff = runoffFL, Jan_ch4E_reach:Dec_ch4E_reach,
                 Jan_ch4F:Dec_ch4F, Jan_iceCov:Dec_iceCov) %>%
   st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
   st_transform("+proj=eqearth +wktext") 
@@ -130,6 +130,18 @@ meth_hexes_avg <- meth_hexes %>%
             Oct_ch4F = mean(Oct_ch4F, na.rm = TRUE),
             Nov_ch4F = mean(Nov_ch4F, na.rm = TRUE),
             Dec_ch4F = mean(Dec_ch4F, na.rm = TRUE),
+            Jan_ch4E = sum(Jan_ch4E_reach, na.rm = TRUE)/1000,
+            Feb_ch4E = sum(Feb_ch4E_reach, na.rm = TRUE)/1000,
+            Mar_ch4E = sum(Mar_ch4E_reach, na.rm = TRUE)/1000,
+            Apr_ch4E = sum(Apr_ch4E_reach, na.rm = TRUE)/1000,
+            May_ch4E = sum(May_ch4E_reach, na.rm = TRUE)/1000,
+            Jun_ch4E = sum(Jun_ch4E_reach, na.rm = TRUE)/1000,
+            Jul_ch4E = sum(Jul_ch4E_reach, na.rm = TRUE)/1000,
+            Aug_ch4E = sum(Aug_ch4E_reach, na.rm = TRUE)/1000,
+            Sep_ch4E = sum(Sep_ch4E_reach, na.rm = TRUE)/1000,
+            Oct_ch4E = sum(Oct_ch4E_reach, na.rm = TRUE)/1000,
+            Nov_ch4E = sum(Nov_ch4E_reach, na.rm = TRUE)/1000,
+            Dec_ch4E = sum(Dec_ch4E_reach, na.rm = TRUE)/1000,
             Jan_icecov = mean(Jan_iceCov, na.rm = TRUE),
             Feb_icecov = mean(Feb_iceCov, na.rm = TRUE),
             Mar_icecov = mean(Mar_iceCov, na.rm = TRUE),
@@ -184,50 +196,74 @@ extrap_hexes_avg <- extrap_hexes %>%
   st_sf() 
 
 
-
-# now do the polygons with extrapolated areas 
-for(Mon in month.abb){
-
-extrap_mon <- extrap_areas %>% 
-  select(int = contains(all_of(Mon))) %>% 
-  filter( int < 0.9) %>% 
-  st_cast("MULTIPOINT") %>% 
-  st_buffer( dist = 30000 ) %>% 
-  st_cast("MULTIPOLYGON") %>% 
-  st_intersection(world)
-
-#find which polygons are intersecting, to simplify geometries
-g = st_intersects(extrap_mon, extrap_mon)
-
-#get the adjancency list of all polygons
-G = graph_from_adj_list(g)
-
-clusters_id =  components(G)
-
-#st_intersection
-pols_merged <- extrap_mon %>% 
-  mutate(cluster_id = clusters_id$membership) %>% 
-  group_by(cluster_id) %>% 
-  summarise(geometry = st_union(geometry)) %>% 
-  mutate(month = Mon, 
-         size =clusters_id$csize) %>% 
-  filter(size > 2)
-
-
-#combining results
-if( Mon == 'Jan'){extrap_pols  <- pols_merged} else {extrap_pols  <- rbind(extrap_pols ,pols_merged)}
-
-print(paste("done", Mon))
-
-}
-
-
-
-
-
 extrap_hexes_avg %>% #extrap_pols %>% 
   st_transform(crs = 4326 ) %>% 
   st_write( "data/processed/GIS/extrap_sites.shp", delete_layer = TRUE)
 
 
+## Aggregated maps of important variables ----
 
+#read the global predictors df
+global_preds <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE) %>% 
+  select(starts_with(c("COMID" ,"slop", "elev", "pyearRS", "gw_", "temp_yr", "k_", "T_OC" ,"peatland_cover", "GPP_yr", "prec_yr", 
+                     "popdens", "P_load", "S_BS", "S_SILt", "T_REF_BULK_DENSITY", "S_GRAVEL" )))
+
+
+names(global_preds) %>% sort()
+
+vars_to_log_glob <-  c("slop", "gw_mean", "k_mean", "T_OC", "P_load" , "popdens")
+
+
+#do same transformations to the global dataset
+features_important <- global_preds %>%
+  rowwise() %>% 
+  mutate(
+         k_mean = mean(k_jan:k_dec),
+         gw_mean = mean(gw_jan:gw_dec)) %>% 
+  dplyr::select(-ends_with(month.abb)) %>% 
+  mutate(across(.cols = all_of(vars_to_log_glob),
+                ~log(.x + .1))) %>%  #log transform those variables, shift a bit from 0 as well
+  rename_with( ~str_c("Log_", all_of(vars_to_log_glob)), .cols = all_of(vars_to_log_glob) )  %>% #rename the log transformed variables 
+  drop_na() %>% 
+  left_join(grades) %>% 
+  dplyr::select(-COMID)
+
+rm(grades, global_preds)
+gc()
+
+#download world map
+world <-  read_sf("data/raw/gis/ne_110m_land/ne_110m_land.shp") %>% 
+  st_transform("+proj=eqearth +wktext") 
+
+
+#make a hex grid for the world and keep only terrestrial masses
+grid <- st_make_grid(
+  world,
+  n = c(400, 400), # grid granularity
+  crs = st_crs(world),
+  what = "polygons",
+  square = FALSE) %>% 
+  st_intersection(world)
+
+grid <- st_sf(index = 1:length(lengths(grid)), grid) 
+
+
+#join the meth data to the grid
+features_hexes <- features_important %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
+  st_transform("+proj=eqearth +wktext") %>% 
+  st_join( grid, join = st_intersects)
+
+#now aggregate all the meth data for each hex, do means and sum for area.
+features_hexes_avg <- features_hexes %>% 
+  st_drop_geometry() %>%
+  group_by(index) %>%
+  summarise(across(everything(), ~ mean(.x, na.rm = TRUE))) %>%
+  right_join(grid, by="index") %>%
+  st_sf() 
+
+features_hexes_avg %>% 
+  drop_na(everything()) %>% 
+  st_sf() %>% 
+  st_transform(crs = 4326) %>% 
+  write_sf( "data/processed/GIS/important_features.shp", delete_layer = TRUE)

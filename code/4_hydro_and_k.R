@@ -70,10 +70,6 @@ qStatsExt <- function(nc,statsNm){
   } else {print('number of rows do not match ...')}
 }
 
-#air-water temperature transformer
-airwaterT <- function(ta){ tw = 0.67*ta + 7.45}
-
-
 for (i in 1:8) {
   print(paste0('Processing ', i))
   
@@ -156,7 +152,7 @@ for (i in 1:8) {
     rename_with(.fn = ~paste0(., "_Ta"),
                 .cols = !contains("COMID") ) %>% 
     mutate(across(ends_with("_Ta"),
-                  function(x){ tw = 0.67 * x + 7.45},
+                  function(x){ tw = 0.67 * x + 7.45}, #air-water temperature function, comes from Raymond et al (2013), Nature
                   .names = "{.col}_Tw")) %>% 
     rename_at(vars(ends_with('Tw')), ~ str_remove(., "\\_Ta")) 
   

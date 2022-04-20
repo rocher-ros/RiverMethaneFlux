@@ -439,8 +439,53 @@ seasonal_df_long %>%
   mutate(lat_label = fct_reorder(as_factor(lat_label), lat,  .desc = FALSE), 
          total_flux_per = total_flux/sum(total_flux)*100) 
   
+##### month /latitude plot of flux rate and surface area
+flux_lat_plot <- 
+  seasonal_df_long %>% 
+  ggplot(aes(month, ch4F))+
+  geom_col()+
+  scale_y_continuous(breaks = c(0, 0.03, 0.06))+
+  facet_wrap(~lat_label, ncol = 1, strip.position = "right")+
+  theme_bw()+
+  labs(x = "", y = "mmol m<sup>-3</sup> d<sup>-1</sup>", title="**CH<sub>4</sub> flux**" , fill="**River area** <br> (km^2 )")+
+  theme(axis.ticks.length.x = unit(0, "cm"),
+        strip.background = element_rect(color=NA, fill = "white"),
+        strip.text.y = element_text(size = 12, angle=0),
+        axis.text.x = element_text(size = 12, color = "gray5"),
+        axis.text.y = element_text(color = "gray40"),
+        panel.border =  element_rect(color="gray70"), 
+        panel.grid = element_blank(),
+        axis.line.y = element_line(color="gray70"),
+        axis.ticks.y = element_line(color="gray70"),
+        axis.title.y = ggtext::element_markdown(size = 10),
+        plot.title = ggtext::element_markdown(size = 14),
+        legend.title = ggtext::element_markdown(size = 12)
+  )
 
+area_lat_plot <- 
+  seasonal_df_long %>% 
+  ggplot(aes(month, areakm2))+
+  geom_col()+
+  scale_y_continuous(position = "right")+
+  facet_wrap(~lat_label, ncol = 1, strip.position = "right", scales="free_y")+
+  theme_bw()+
+  labs(x = "", y = expression(km^2), title = "**River surface area**")+
+  theme(axis.ticks.length.x = unit(0, "cm"),
+        strip.background = element_blank(),#element_rect(color=NA, fill = "gray80"),
+        strip.text.y = element_blank(), #element_text(size = 12, angle=0),
+        axis.text.x = element_text(size = 12, color = "gray5"),
+        axis.text.y = element_text(color = "gray40"),
+        panel.border =  element_rect(color="gray70"), 
+        panel.grid = element_blank(),
+        axis.line.y = element_line(color="gray70"),
+        axis.ticks.y = element_line(color="gray70"),
+        plot.title = ggtext::element_markdown(size = 14)
+  )
 
+flux_lat_plot +
+area_lat_plot
+
+ggsave("figures/supplementary/flux_area_month.png", width =10, height = 8, dpi = 800)
 
 # Flux comparison with grime data ----
 
@@ -487,6 +532,22 @@ grime_comids <- read_csv("data/processed/sites_meth_comid.csv") %>%
   mutate(Site_Nid= as.character(Site_Nid))
 
 
+# join the flux with concentration and the site dataset, 
+boltzmann_k <- 8.62e-5
+
+flux_sites <- flux_df %>% 
+  left_join( conc_df, by=c("Site_Nid", "Date_start")) %>% 
+  left_join( sites_df, by="Site_Nid") %>% 
+  filter(`Aggregated?` == "No", WaterTemp_actual < 100, 
+         !Channel_type %in% c("DD","GT", "PS", "TH","Th", "CAN")) %>%
+  mutate(WaterTemp_best = ifelse(is.na(WaterTemp_actual) == TRUE, WaterTemp_est, WaterTemp_actual) ) %>% 
+  drop_na(Diffusive_CH4_Flux_Mean, WaterTemp_best ) %>% 
+  mutate(site_lat = paste("Site:",Site_Nid,"\nLat: " , round(Latitude,1), sep=""),
+         temp_inv = 1/(boltzmann_k*(WaterTemp_best + 273.15)),
+         temp_stand = 1/(boltzmann_k*288.15) - 1/(boltzmann_k*(WaterTemp_best + 273.15))) 
+
+#sort by latitude for later plots
+flux_sites$site_lat <- reorder(flux_sites$site_lat, desc(flux_sites$Latitude))
 
 # Process all files ----
 sites_clean <- sites_df %>% 
@@ -499,10 +560,20 @@ sites_clean <- sites_df %>%
 conc_df_comids <- conc_df %>% 
   filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
   left_join(sites_clean, by="Site_Nid") %>% 
-  dplyr::select(Site_Nid, `Aggregated?`, Channel_type, COMID, distance_snapped, slope_m_m, CH4mean, CO2mean,
+  dplyr::select(Site_Nid, `Aggregated?`, Channel_type, COMID, Latitude, distance_snapped, slope_m_m, CH4mean, CO2mean,
                 date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  ) %>% 
   mutate(CH4mean =ifelse(CH4mean < 0, 0.0001, CH4mean)) %>% 
   drop_na(CH4mean)
+
+conc_df_comids %>% 
+  group_by(Site_Nid) %>% 
+  summarise(CH4mean= median(CH4mean),
+            Latitude = first(Latitude),
+            Site_Nid = first(Site_Nid),
+            COMID = first(COMID)) %>% 
+  arrange(desc(CH4mean)) %>% 
+  dplyr::select(CH4mean, Latitude, Site_Nid, COMID) %>% 
+  print(n=30)
 
 
 #get the flux df and fix some issues, also merge with conc_Df
@@ -585,9 +656,11 @@ plot_overall <- ggplot(data= flux_comp,
  # stat_regline_equation(label.y.npc = .9)+
   scale_x_log10(labels=scales::number, limits = c(0.0001, 1000))+
   scale_y_log10(labels=scales::number, limits = c(0.0001, 1000))+
-  labs(x="Measured CH4 diffusive flux", y="Modelled CH4 diffusive flux", title = "All data")+
+  labs(x="Measured CH<sub>4</sub> diffusive flux", y="Modelled CH<sub>4</sub> diffusive flux", title = "All data")+
   theme_bw()+
-  theme(legend.key.size = unit(1, 'cm'))
+  theme(legend.key.size = unit(1, 'cm'), 
+        axis.title.x = ggtext::element_markdown(),
+        axis.title.y = ggtext::element_markdown())
 
 plot_zoomed <- ggplot(data= flux_comp %>% 
          filter( !k_method %in% c("not determined", "other"),
@@ -606,15 +679,20 @@ plot_zoomed <- ggplot(data= flux_comp %>%
   scale_x_log10(labels=scales::number, limits = c(0.01, 100))+
   scale_y_log10(labels=scales::number, limits = c(0.1, 10))+
   scale_color_viridis_c(trans="log10", labels=scales::number, breaks = c(10, 50,  150, 1000, 10000))+
-  labs(x = "Measured CH4 diffusive flux", y="", 
+  labs(x = "Measured CH<sub>4</sub> diffusive flux", y="", 
        color = "% difference\n predicted \n vs observed k",
-       title = "Points with comparable k (+/- 50%)")+
+       title = "Points with comparable k<sub>600</sub> (+/- 50%)")+
   theme_bw()+
-  theme(legend.key.size = unit(1, 'cm'))
+  theme(legend.key.size = unit(1, 'cm'),
+        axis.title.x = ggtext::element_markdown(),
+        plot.title =  ggtext::element_markdown())
 
-plot_overall + plot_zoomed
+plot_overall + 
+  plot_zoomed +
+  plot_annotation(tag_levels = 'a') & 
+  theme(plot.tag.position = c(0.1, 1), plot.tag = element_text(size=15))
 
-ggsave("figures/supplementary/flux_comp_similark.png", width = 8, height = 3.5)
+ggsave("figures/supplementary/flux_comp_similark.png", width = 9, height = 4)
 
 flux_comp %>% 
   filter(k600_pred > .01, k600_obs > .01) %>% 
@@ -630,22 +708,127 @@ flux_comp %>%
 #ggsave("figures/flux_comp_boxplot.png")
 
 
+#temperature dependence plots
+mycolors <- colorRampPalette(RColorBrewer::brewer.pal(8, "Set1"))(13)
+
+plot_sites <- flux_sites %>% 
+  filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
+  ggplot(aes(temp_stand, Diffusive_CH4_Flux_Mean))+
+  geom_point( size = 2, alpha = .1)+
+  geom_smooth(method= "lm", color="gray20", se= FALSE, size = 1)+
+  geom_point(data= flux_sites %>% 
+               filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
+               add_count(Site_Nid) %>% filter(n > 30),  
+             aes(temp_stand, Diffusive_CH4_Flux_Mean, color=Site_Nid), alpha=.6, size= 2)+
+  geom_smooth(data= flux_sites %>% 
+                filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
+                add_count(Site_Nid) %>% filter(n > 30),  
+              method= "lm", se= FALSE,
+              aes(temp_stand, Diffusive_CH4_Flux_Mean, color=Site_Nid), alpha=.6)+
+  #geom_abline(slope=.96, intercept = -.39, linetype = 2)+
+  #annotate("text", x=2.8, y = 360, label="m = 0.96", angle = 35)+
+  scale_color_manual(values = mycolors)+
+  scale_x_continuous(name= expression(paste("Standardized temperature ", bgroup("(", frac(1, kT) - frac(1, kT[C]), ")" ))), limits= c(-2.6, 3.1),
+                     sec.axis = sec_axis(~ (273.15*boltzmann_k* . + 0.0520562)/(0.00347041 - boltzmann_k* . ), name =expression("Temperature " ( degree*C)), 
+                                         breaks = seq(0, 40, by=5)) )+ # solved using wolfram alpha, y= 1/(k*(288.15)) - 1/(k*(x+273.15)), solve x 
+  scale_y_continuous(trans= "log10", labels = scales::number, breaks = c(.01, .1, 1, 10, 100),
+                     name= "")+#"Diffusive CH<sub>4</sub> flux <br> (mmol m^-2 d<sup>-1</sup>)")+
+  theme_classic()+
+  theme(axis.title.y = ggtext::element_markdown(), legend.position = "none")
+
+
+flux_sites %>% 
+  filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
+  drop_na(System_size) %>% 
+  mutate(System_size = fct_relevel(System_size, "large", after = Inf)) %>% 
+  ggplot(aes(temp_stand, Diffusive_CH4_Flux_Mean))+
+  geom_point(aes( color=abs(Latitude)),  size = 2, alpha = .6)+
+  geom_smooth(method= "lm", color="gray20", se= FALSE, size = 1)+
+  #stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), label.y.npc = .99)+
+  stat_regline_equation(label.y.npc = .99)+
+  scale_color_viridis_c(name="Latitude", limits= c(0, 71))+
+  #geom_abline(slope = .96, intercept = -.39, linetype = 2)+
+  #annotate("text", x = 2.7, y = 90, label="m = 0.96", angle = 48)+
+  #annotate("text", x = -2, y = 250, label="n = 4,417")+
+  scale_x_continuous(name= expression(paste("Standardized temperature ", bgroup("(", frac(1, kT) - frac(1, kT[C]), ")" ))), limits= c(-2.6, 3.1),
+                     sec.axis = sec_axis(~ (273.15*boltzmann_k* . + 0.0520562)/(0.00347041 - boltzmann_k* . ), name =expression("Temperature " ( degree*C)), 
+                                         breaks = seq(0, 40, by=5)) )+ # solved using wolfram alpha, y= 1/(k*(288.15)) - 1/(k*(x+273.15)), solve x 
+  scale_y_continuous(trans= "log10", labels = scales::number, breaks = c(.01, .1, 1, 10, 100),
+                     name= "Diffusive CH<sub>4</sub> flux <br> (mmol m^-2 d<sup>-1</sup>)")+
+  theme_classic()+
+  theme(axis.title.y = ggtext::element_markdown(), legend.position = "right")+
+  facet_wrap(~System_size)
+
+ggsave("figures/supplementary/river_size_temp.png", width = 12)
+
+diff_plot <- 
+  flux_sites %>% 
+  filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
+  ggplot(aes(temp_stand, Diffusive_CH4_Flux_Mean))+
+  geom_point(aes( color=abs(Latitude)),  size = 2, alpha = .6)+
+  geom_smooth(method= "lm", color="gray20", se= FALSE, size = 1)+
+  #stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), label.y.npc = .99)+
+  stat_regline_equation(label.y.npc = .99)+
+  scale_color_viridis_c(name="Latitude", limits= c(0, 71))+
+  #geom_abline(slope = .96, intercept = -.39, linetype = 2)+
+  #annotate("text", x = 2.8, y = 360, label="m = 0.96", angle = 35)+
+  annotate("text", x = -2, y = 250, label="n = 4,417")+
+  scale_x_continuous(name= expression(paste("Standardized temperature ", bgroup("(", frac(1, kT) - frac(1, kT[C]), ")" ))), limits= c(-2.6, 3.1),
+                     sec.axis = sec_axis(~ (273.15*boltzmann_k* . + 0.0520562)/(0.00347041 - boltzmann_k* . ), name =expression("Temperature " ( degree*C)), 
+                                         breaks = seq(0, 40, by=5)) )+ # solved using wolfram alpha, y= 1/(k*(288.15)) - 1/(k*(x+273.15)), solve x 
+  scale_y_continuous(trans= "log10", labels = scales::number, breaks = c(.01, .1, 1, 10, 100),
+                     name= "Diffusive CH<sub>4</sub> flux <br> (mmol m^-2 d<sup>-1</sup>)")+
+  theme_classic()+
+  theme(axis.title.y = ggtext::element_markdown(), legend.position = "right")
+
+
+
+flux_sites %>% 
+  filter(Eb_CH4_Flux_Mean > 0.001) %>% 
+  ggplot(aes(temp_stand, (Eb_CH4_Flux_Mean)))+
+  geom_point(aes( color=abs(Latitude)),  size = 3, alpha = .6)+
+  geom_smooth(method= "lm", color="gray20", se= FALSE, size=2)+
+  #stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), label.y.npc = .99)+
+  stat_regline_equation(label.y.npc = .99)+
+  scale_color_viridis_c(name="Latitude")+
+  #geom_abline(slope=.96, intercept = -.71, linetype = 2)+
+  #annotate("text", x=2.9, y = 75, label="m = 0.96", angle=34)+
+  annotate("text", x=-2.24, y = 150, label="n = 244")+
+  scale_x_continuous(name= expression(paste("Standardized temperature ", bgroup("(", frac(1, kT) - frac(1, kT[C]), ")" ))), limits= c(-2.6, 3.1),
+                     sec.axis = sec_axis(~ (273.15*boltzmann_k* . + 0.0520562)/(0.00347041 - boltzmann_k* . ), name =expression("Temperature " ( degree*C)), 
+                                         breaks = seq(0, 40, by=5)) )+ # solved using wolfram alpha, y= 1/(k*(288.15)) - 1/(k*(x+273.15)), solve x 
+  scale_y_continuous(trans= "log10", labels = scales::number, breaks = c(.01, .1, 1, 10, 100),
+                     name= "Ebullitive CH<sub>4</sub> flux <br> (mmol m^-2 d<sup>-1</sup>)")+
+  theme_classic()+
+  theme(axis.title.y = ggtext::element_markdown(), legend.position = "right")
+
+ggsave("figures/supplementary/ebullition_temp.png", scale = 1)
+
+flux_comid %>% 
+  filter(Eb_CH4_Flux_Mean > 0.00001,
+         Diffusive_CH4_Flux_Mean > 0.0001) %>%
+  filter(k_method == "chamber + conc") %>% 
+  select(Site_Nid) %>% unique()
+
+mycolors2 <- colorRampPalette(RColorBrewer::brewer.pal(8, "Paired"))(93)
 
 #ebullition
-reg_compl_plot <- flux_comid %>% 
+reg_compl_plot <- 
+  flux_comid %>% 
   filter(Eb_CH4_Flux_Mean > 0.00001,
          Diffusive_CH4_Flux_Mean > 0.0001) %>% 
-  filter(k_method == "chamber + conc") %>% 
+  filter(k_method %in% c("chamber + conc", "tracer addition")) %>% 
   ggplot(aes(Diffusive_CH4_Flux_Mean, Eb_CH4_Flux_Mean ))+
-  geom_point( aes( color=Site_Nid), size=4, alpha=.4)+
-  geom_smooth( method="lm",  color="black", size=2)+
+  geom_point( aes( color=Site_Nid), size = 3, alpha=.7)+
+  geom_smooth( method="lm",  color="black", size=1)+
   geom_abline(intercept = 0, slope = 1, linetype=2)+
   stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), label.y.npc = .99)+
   stat_regline_equation(label.y.npc = .9)+
+  scale_color_manual(values = mycolors2)+
   scale_y_log10(labels=scales::number)+
   scale_x_log10(labels=scales::number)+
-  labs(x = "Diffusive CH<sub>4</sub> flux (mmol m^-2 d<sup>-1</sup>)", 
-       y = "Ebulitive CH<sub>4</sub> flux (mmol m^-2 d<sup>-1</sup>)")+
+  labs(x = "Diffusive CH<sub>4</sub> flux <br>(mmol m^-2 d<sup>-1</sup>)", 
+       y = "Ebulitive CH<sub>4</sub> flux <br>(mmol m^-2 d<sup>-1</sup>)")+
   theme_classic()+
   theme(legend.position = "none",
         axis.title.y = ggtext::element_markdown(),
@@ -653,10 +836,11 @@ reg_compl_plot <- flux_comid %>%
 
 
 #ebullition
-density_comp_plot <- flux_comid %>% 
-  filter(Eb_CH4_Flux_Mean > 0.00001,
+density_comp_plot <- 
+  flux_comid %>% 
+  filter(Eb_CH4_Flux_Mean > 0.0001,
          Diffusive_CH4_Flux_Mean > 0.0001) %>% 
-  filter(k_method == "chamber + conc") %>% 
+  filter(k_method %in% c("chamber + conc", "tracer addition")) %>% 
   pivot_longer(c(Eb_CH4_Flux_Mean, Diffusive_CH4_Flux_Mean ), names_to = "type", values_to = "flux") %>% 
   mutate(type= case_when(type == "Eb_CH4_Flux_Mean" ~ "Ebullition",
                          type == "Diffusive_CH4_Flux_Mean" ~ "Diffusion" )) %>% 
@@ -666,41 +850,100 @@ density_comp_plot <- flux_comid %>%
                position = position_nudge(x = 0.1, y = 0), show.legend = FALSE)+
   scale_y_log10(labels=scales::number)+
   scale_fill_manual(values= c("darkblue", "cornflowerblue"))+
-   labs(x = "", y = "CH<sub>4</sub> flux (mmol m^-2 d<sup>-1</sup>)")+
+   labs(x = "", y = "CH<sub>4</sub> flux<br> (mmol m^-2 d<sup>-1</sup>)")+
   theme_classic()+
   theme(legend.position = "none",
         axis.title.y = ggtext::element_markdown(),
         axis.ticks.x = element_blank(),
         axis.text.x = element_text(size=11, color="black"))
 
-density_comp_plot + reg_compl_plot + plot_annotation(tag_levels = 'a')  & theme(plot.tag.position = c(0.1, 1))
 
-ggsave("figures/supplementary/ebulliton_diffusion.png", width = 7.5, height = 4)
+diff_plot + 
+  plot_sites +
+  density_comp_plot + 
+  reg_compl_plot + 
+  plot_layout(ncol = 2) +
+  plot_annotation(tag_levels = 'a') & 
+  theme(plot.tag.position = c(0.1, 1), plot.tag = element_text(size=15))
+
+ggsave("figures/diff_temperature_ebullition.png", width = 10, height = 7)
 
 
 
-#### Compare with mountains 
-mountains <- read_csv("data/raw/gis/GRADES_attributes/mountains.csv")
+flux_comid %>% 
+  filter(Eb_CH4_Flux_Mean > 0.0001,
+         Diffusive_CH4_Flux_Mean > 0.0001) %>% 
+  filter(k_method == "chamber + conc") %>% 
+  summarise(eb_median = median(Eb_CH4_Flux_Mean),
+            diff_median = median(Diffusive_CH4_Flux_Mean),
+            eb_min = min(Eb_CH4_Flux_Mean),
+            eb_max = max(Eb_CH4_Flux_Mean))
 
-grades_ch4_fluxes_with_mountains <- read_csv("data/processed/grades_ch4_fluxes_with_mountains.csv") %>% 
-  select(COMID:Dec_ch4F) %>% 
-  left_join(mountains) %>% 
-  drop_na(Jan_ch4F) %>% 
-  rowwise() %>% 
-  mutate(flux.predicted = mean(Jan_ch4F:Dec_ch4F, na.rm = TRUE),  
-        mountains = as.factor(mountains)) 
 
-obs_mountains <- flux_comid %>% 
-  filter(Land_use == "Mountain", Diffusive_CH4_Flux_Mean < 10) %>%
-  ggplot(aes(x= Diffusive_CH4_Flux_Mean, y = as.factor(COMID) ))+
-  geom_boxplot()+
-  scale_x_log10(labels = scales::number, limits= c(.001, 10))+
-  theme_classic()  
+residuals_ebb <- flux_comid %>% 
+  filter(Eb_CH4_Flux_Mean > 0.0001,
+         Diffusive_CH4_Flux_Mean > 0.0001, 
+         k_method == "chamber + conc") %>% 
+  mutate(diff_log = log(Diffusive_CH4_Flux_Mean), 
+         ebb_log = log(Eb_CH4_Flux_Mean)) %>% 
+  do(augment(lm(ebb_log ~ diff_log, data=.)))
 
-pred_mountains <- grades_ch4_fluxes_with_mountains %>% 
-  ggplot(aes(x = flux.predicted*1000/12, y = mountains ))+
-  geom_boxplot()+
-  scale_x_log10(labels = scales::number, limits= c(.001, 10))+
-  theme_classic()  
+residuals_ebb %>% 
+  select(.resid) %>% 
+  mutate(residuals = exp(.resid)) %>% 
+  summarise(sd = sd(residuals),
+            mean =mean(residuals))
 
-pred_mountains/ obs_mountains
+ggplot(residuals_ebb)+
+  geom_histogram(aes(.resid), bins=60)+
+  theme_classic()
+  
+
+ 
+    
+    
+## Maps of important features 
+
+important_pols <- st_read( "data/processed/GIS/important_features.shp") %>% 
+  st_transform("+proj=eqearth +wktext") %>% 
+  mutate(prec_yr = log(prec_yr))
+
+
+
+ggplot(important_pols, aes(fill=slope))+
+  geom_sf(color= NA)+
+  scale_fill_viridis_c()
+
+#devtools::install_github("marcosci/layer")
+
+library(layer)
+
+
+
+tilt_landscape_1 <- tilt_map(important_pols)
+tilt_landscape_2 <- tilt_map(important_pols,  y_shift = -15000000)
+tilt_landscape_3 <- tilt_map(important_pols,  y_shift = -15000000*2)
+tilt_landscape_4 <- tilt_map(important_pols,  y_shift = -15000000*3)
+tilt_landscape_5 <- tilt_map(important_pols,  y_shift = -15000000*4)
+tilt_landscape_6 <- tilt_map(important_pols,  y_shift = -15000000*5)
+
+
+map_list <- list(tilt_landscape_1, tilt_landscape_2, tilt_landscape_3, tilt_landscape_4, tilt_landscape_5,
+                 tilt_landscape_6 )
+
+plots_tiled1 <- plot_tiltedmaps(map_list, 
+                                layer = c("slope", "elev", "pyearRS", "Lg_gw_m", "Lg_T_OC", "temp_yr" ),
+                                palette = c("turku", "batlowW", "lajolla","tofino", "bilbao",  "rocket"),
+                                direction = c(-1, 1, 1, 1, 1, -1))
+
+plots_tiled2 <- plot_tiltedmaps(map_list, 
+                                layer = c("Lg_k_mn", "ptlnd_c", "GPP_yr", "prec_yr", "Lg_ppdn", "S_SILT"),
+                                palette = c("grayC", "inferno" ,"bam", "roma", "tokyo", "cividis"),
+                                direction = c(1, 1, 1, 1, 1, 1))
+
+plots_combined <- plots_tiled1 + plots_tiled2
+
+ggsave( "figures/supplementary/tiled_maps.png", plots_combined, dpi = 1000, scale = 4)
+
+
+
