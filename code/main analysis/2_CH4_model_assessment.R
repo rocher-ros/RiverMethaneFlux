@@ -526,7 +526,7 @@ pdp_plot <- pdp_data_plot %>%
 
 
 # combine with jitter plot of the sites targeted
-load(file.path("data", "raw", "MethDB_tables_converted.rda"))
+load(file.path("data", "MethDB_tables_converted.rda"))
 
 concs_forplot <- conc_df %>% 
   left_join( sites_df, by="Site_Nid") %>% 

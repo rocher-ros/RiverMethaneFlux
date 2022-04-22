@@ -54,11 +54,11 @@ if(all(file.exists(paste("data/raw/grades", files, sep="/"))) == TRUE){
 # Download the methane database
 drive_download(
   "SCIENCE/PROJECTS/RiverMethaneFlux/methane/MethDB_tables_converted.rda",
-  path = "data/raw/MethDB_tables_converted.rda",
+  path = "data/MethDB_tables_converted.rda",
   overwrite = TRUE
 )
 #load the methane DB 
-load(file.path("data", "raw", "MethDB_tables_converted.rda"))
+load(file.path("data", "MethDB_tables_converted.rda"))
 
 
 #select the sites, and make a new column to get the continent name. This will be the way to break the processing in pieces

@@ -27,17 +27,6 @@ if(all(file.exists(names_destination)) == TRUE) {
   map2(names_in_drive, names_destination, drive_download)
 }
 
-## Download the GRiMe ----
-if(file.exists("data/raw/MethDB_tables_converted.rda") == TRUE) {
-  print("files already downloaded")
-} else {
-  drive_download(
-    "SCIENCE/PROJECTS/RiverMethaneFlux/methane/MethDB_tables_converted.rda",
-    path = "data/raw/MethDB_tables_converted.rda",
-    overwrite = TRUE
-  )
-}
-
 ## Download the sites in GRiMe with the COMID's ----
 if(file.exists("data/processed/sites_meth_comid.csv") == TRUE) {
   print("files already downloaded")

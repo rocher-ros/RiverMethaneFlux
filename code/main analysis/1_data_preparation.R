@@ -27,7 +27,7 @@ lapply(package_list, require, character.only = TRUE)
 
 
 ## Load the GRiMeDB ----
-load(file.path("data", "raw", "MethDB_tables_converted.rda"))
+load(file.path("data", "MethDB_tables_converted.rda"))
 
 sites_df <- sites_df %>% 
   mutate(Channel_type = ifelse(is.na(Channel_type) == TRUE, "normal", Channel_type)) 
