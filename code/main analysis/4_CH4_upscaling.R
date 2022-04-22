@@ -177,8 +177,8 @@ for (i in 1:length(wkbasins$wkbasin)) {
 }
 rm(df_p)
 
-#join wkbasin prectemp
-prectemp <- read_csv('data/raw/gis/upscaling_vars/basin4TempPrec.csv')
+#join wkbasin prectemp 
+prectemp <- read_csv('data/processed/upscaling_extra_data/basin4TempPrec.csv')
 colnames(prectemp)[2:13] <- paste0(month.abb, '_tavg')
 colnames(prectemp)[14:25] <- paste0(month.abb, '_prec')
 
@@ -423,7 +423,7 @@ rm(list = setdiff(ls(), c("df", "basinArea" )))
 gc()
 
 ####replacing yeaWidth with GRWL width where available 
-GRWLwidth <- read_csv('data/raw/gis/upscaling_vars/GRWLwidthHydroBASIN4_30mplus.csv') %>% 
+GRWLwidth <- read_csv('data/processed/upscaling_extra_data/GRWLwidthHydroBASIN4_30mplus.csv') %>% 
   select(COMID, width_mean) %>% 
   group_by(COMID) %>% 
   summarise(width_mean = min(width_mean)) %>% 
@@ -536,7 +536,7 @@ main_stats
 two_SD <- main_stats$sd * 2
 
 #get ice coverage file
-icecov <- read_csv('data/raw/gis/upscaling_vars/iceout.csv', 
+icecov <- read_csv('data/processed/upscaling_extra_data/iceout.csv', 
                    col_types = cols(.default='d',HYBAS_ID='c'))
 
 names(icecov) <- c('HYBAS_ID', paste0( month.abb, '_iceCov'))

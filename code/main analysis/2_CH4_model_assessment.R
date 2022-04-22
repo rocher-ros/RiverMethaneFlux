@@ -75,7 +75,7 @@ grimeDB_attr_trans <- grimeDB_attributes %>%
 #Do  some histograms with the log transformed variables
 # some variables are still very skewed, usually the anthropogenic predictors that have lots of 0s
 grimeDB_attr_trans %>% 
-  select(-all_of(variables_to_remove)) %>% 
+  select(-all_of(variables_to_remove), -biome_label) %>% 
   pivot_longer(cols = everything(), names_to = "predictor", values_to = "value" ) %>% 
   left_join(labeller_vars, by=c("predictor"="var")  )  %>%
   ggplot(aes(value))+
