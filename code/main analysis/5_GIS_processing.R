@@ -1,11 +1,15 @@
 # Info ------
 # Author: Gerard Rocher-Ros
-# Script make some figures of CH4 emissions in rivers globally.
+# Last edit: 2022-04-25
+# Script to process files into GIS layers for further visualization. 
+# This script uses the modelled methane concentrations in scripts #3, and upscaled fluxes from scripts #4 to
+# produce GIS shapefiles for visualization. Data is aggregated with larger hexes to represent broad patterns.
+# 
 
 
 # 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive' , 'sf',  'rnaturalearth')
+package_list <- c('tidyverse', 'sf',  'rnaturalearth')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -20,7 +24,8 @@ lapply(package_list, require, character.only = TRUE)
 # 1. Load files ----
 
 #upscaled methane fluxes
-meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) 
+meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) %>% 
+  dplyr::select(-runoffFL, -contains("area"))
 
 #upscaled methane concentrations
 #mean estimates are "month_ch4", while SD are "month_ch4_sd"
@@ -32,14 +37,13 @@ meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "
 
 # load file with discharge and k data 
 hydro_k <- read_csv("data/processed/q_and_k.csv") %>% 
-  dplyr::select(COMID, Slope, contains("k")) %>% 
+  dplyr::select(COMID, contains("k"), runoff_yr) %>% 
   rowwise() %>% 
   mutate( k_mean = mean(Jan_k:Dec_k, na.rm = TRUE)) %>% 
-  dplyr::select(COMID, Slope, k_mean)
+  dplyr::select(COMID, k_mean, runoff_yr)
 
 #read coordinates from grades
-grades <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
-  dplyr::select(COMID, lon=lon_mid, lat = lat_mid, subarea)
+grades <- read_csv("data/processed/grades_coords.csv") 
 
 #read extrapolated areas
 extrap_areas <- read_csv("data/processed/interpolated_COMIDS.csv") %>% 
@@ -51,8 +55,7 @@ extrap_areas <- read_csv("data/processed/interpolated_COMIDS.csv") %>%
 meth_gis <- meth_concs %>% 
   left_join( grades, by = "COMID") %>%
   left_join( meth_fluxes, by = "COMID") %>% 
-  left_join(hydro_k, by = "COMID")
-
+  left_join(hydro_k, by = "COMID") 
 
 #download world map
 world <-  ne_download(scale = 110, type = 'land', category = 'physical', returnclass = "sf") %>%
@@ -75,8 +78,8 @@ meth_avg <- meth_gis %>%
           ch4_sd = mean(Jan_ch4_sd:Dec_ch4_sd, na.rm = TRUE),
           ch4_cv = ch4_sd / ch4_mean * 100,
           Ech4_cv =mean(Jan_ch4F_cv:Dec_ch4F_cv, na.rm = TRUE) * 100 ) %>% 
-  dplyr::select(COMID:lat, ch4_mean, Fch4_mean, ch4_cv, Ech4_cv, runoff = runoffFL, Jan_ch4E_reach:Dec_ch4E_reach,
-                Jan_ch4F:Dec_ch4F, Jan_iceCov:Dec_iceCov) %>%
+  dplyr::select(COMID:lon, ch4_mean, Fch4_mean, ch4_cv, Ech4_cv, Jan_ch4E_reach:Dec_ch4E_reach,
+                Jan_ch4F:Dec_ch4F, Jan_iceCov:Dec_iceCov, k_mean, runoff = runoff_yr) %>%
   st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
   st_transform("+proj=eqearth +wktext") 
 
@@ -202,6 +205,7 @@ extrap_hexes_avg %>% #extrap_pols %>%
 
 
 ## Aggregated maps of important variables ----
+
 
 #read the global predictors df
 global_preds <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE) %>% 

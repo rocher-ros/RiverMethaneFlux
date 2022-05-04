@@ -6,7 +6,7 @@
 
 # 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'tidymodels', 'googledrive' ,  'lubridate', 'vip', 'corrr', 'ggpubr', 'DALEXtra', 'ggtext', 'patchwork')
+package_list <- c('tidyverse', 'tidymodels', 'lubridate', 'vip', 'corrr', 'ggpubr', 'DALEXtra', 'ggtext', 'patchwork')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -24,18 +24,15 @@ lapply(package_list, require, character.only = TRUE)
 if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE) {
   print("files already downloaded")
 } else {
-  drive_download(
-    "SCIENCE/PROJECTS/RiverMethaneFlux/processed/grimeDB_concs_with_grade_attributes.csv",
-    path = "data/processed/grimeDB_concs_with_grade_attributes.csv",
-    overwrite = TRUE
-  )
+  print("go to script 1_data_preparation.R and run to produce the needed file for this script")
 }
 
 # 1. Data filtering ----
 # First clean the methDB for the useful sites 
 # Steps done:
 # 1. remove aggregated sites
-# 2. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
+# 2. remove sites snapped far away to a river
+# 3. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
 #    Thermogenically affected, Ditches
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
   filter(`Aggregated?` == "No", distance_snapped < 50000,
@@ -267,9 +264,9 @@ n.cores= parallel::detectCores()-1
 
 rf_mod <-
   rand_forest(
-    mtry = 10,
-    trees = 1200,
-    min_n = 21 ) %>%
+    mtry = 8,
+    trees = 1000,
+    min_n = 6 ) %>%
   set_mode("regression") %>%
   set_engine("ranger", importance="permutation", num.threads = n.cores)
 
@@ -351,20 +348,23 @@ monthly_models <- lst(
           model_fit = model_out[2]) %>% 
   select(-data, -model_out)
 
-#plot them  
+#plot them. firs we do nicer labels for the months
 labelled_months <- tibble(month_label = tolower(month.abb), labels =month.name)
 
+#extract the model predicition data for plotting model performance
 monthly_models_unnested <- monthly_models %>% 
   mutate(month_label= fct_relevel(month_label, levels = toupper(month.abb))) %>% 
   unnest(preds)  %>% 
   left_join(labelled_months, by = "month_label") %>% 
   mutate(labels = fct_relevel(labels, month.name)) 
 
+#calculate the RMSE
 rms_text <- monthly_models_unnested %>% 
   group_by(labels) %>% 
   summarise(rmse = exp(sqrt(mean((Log_CH4mean - .pred)^2))) - 0.1 ) %>% 
   mutate(rms_label= paste("RMSE = ", round(rmse, 2) ))
-  
+
+# plot model predicitons vs observation of the testing dataset  
 ggplot(monthly_models_unnested, aes(exp(.pred), exp(Log_CH4mean)))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
@@ -402,7 +402,7 @@ ggplot(monthly_models_unnested, aes(.pred, Log_CH4mean-.pred))+
 
 ggsave(filename= "figures/supplementary/model_residuals_monthly.png", width = 9, height = 8)
 
-#residuals
+#residuals plot for each month
 ggplot(monthly_models_unnested, aes( x=Log_CH4mean-.pred))+
   geom_density(alpha = .6, fill= "gray60")+
   labs( x = "**Residuals** <br>log(mmol m<sup>-3</sup>)")+
@@ -413,7 +413,7 @@ ggplot(monthly_models_unnested, aes( x=Log_CH4mean-.pred))+
         strip.background = element_rect(fill="white"),
         strip.text = element_text(size=12))
 
-#variable importance 
+#variable importance . make a simple function to map through the df
 get_vi_vals <- function(data){
   data %>% 
     extract_fit_parsnip() %>% 
@@ -446,16 +446,12 @@ ggplot( aes(x=Importance,
   stat_summary( aes(fill = type), color=NA, geom="bar", fun="mean", alpha=.8)+
   stat_summary(fun.data = mean_sd, geom = "linerange", size=1.5, alpha=.6)+
   scale_x_continuous(expand = c(0,0), trans = "sqrt")+
-  #scale_y_discrete(position = "right")+
   scale_fill_manual(values=c("forestgreen", "dodgerblue3","brown3", "darkgoldenrod3", "gray60", "chocolate"), name="Category")+ #
   theme_classic()+
   labs(y="", fill="Category")+
   theme(legend.position = c(.9,.15), axis.text.y =ggtext::element_markdown(), legend.title =element_text(face="bold") )
 
-
-
 ## run the data on the whole dataset, not nesting by month. This is to do PDPs ----
-
 set.seed(123)
 
 
@@ -498,7 +494,7 @@ pdp_data_plot <- pdp_rf$agr_profiles %>%
 
 
 
-### Figure VIP+ partial dependence
+##partial dependence plot skeleton, to be used below
 pdp_plot <- pdp_data_plot %>% 
   ggplot(aes(x, y_hat, color=type))+
   geom_line(size=1)+
@@ -524,10 +520,11 @@ pdp_plot <- pdp_data_plot %>%
 
 #ggsave("figures/rf_figure.png",  height = 7, width = 6, dpi=500)
 
-
+# To do figure 2b we need some extra data form methDB
 # combine with jitter plot of the sites targeted
 load(file.path("data", "MethDB_tables_converted.rda"))
 
+#wrangle all the concentrations data and fix labels for channel types
 concs_forplot <- conc_df %>% 
   left_join( sites_df, by="Site_Nid") %>% 
   filter(CH4mean >= 0.001) %>%
@@ -540,6 +537,7 @@ concs_forplot <- conc_df %>%
                                   TRUE ~ "**Other data**"),
          Channel_type = fct_relevel(Channel_type, "**Other data**", after = Inf)) 
 
+#plot of jittered data for the targeted channel types selected above
 othersites_plot <- 
   ggplot(concs_forplot, aes(y = Channel_type,  x = CH4mean, color= Channel_type))+
   geom_jitter(size = 2, alpha = ifelse(concs_forplot$Channel_type == "**Other data**", 0, 0.7))+
@@ -552,10 +550,10 @@ othersites_plot <-
   theme(legend.position = "none", 
         axis.title.x = ggtext::element_markdown(),
         axis.text.y = ggtext::element_markdown(),
-        #axis.ticks.y = element_line(color="transparent"),
         panel.background = element_rect(fill = "transparent"), # bg of the panel
         plot.background = element_rect(fill = "transparent", color = NA)) # bg of the plot
 
+#plot of all data, jitered
 alldata_plot <- 
   concs_forplot %>% 
   mutate(all = "all") %>% 
@@ -576,12 +574,15 @@ alldata_plot <-
     plot.margin = unit(c(0,0,0,3), "cm")
   )
 
+### Make figure 2a: VI plot+ pdp plot
 vi_pdp_plot <- vi_plot + 
   inset_element(pdp_plot, left = -.1, bottom = -.027, right = .43, top = 1)
 
+#Make figure 2b: jitered mess with targeted sites
 plot_jittered <- alldata_plot + 
   inset_element(othersites_plot, left = -.48, bottom = -.057, right = 1, top = 1)
 
+#combine then amd label them
 plots_combined <- vi_pdp_plot + 
   plot_jittered +
   plot_layout(ncol=2, tag_level = 'keep') + 
@@ -591,7 +592,7 @@ plots_combined <- vi_pdp_plot +
 ggsave("figures/variables_jitter.png", plot = plots_combined, height = 9, width = 9.5, dpi=500)  
 
 
-##Figure only of the partial dependence 
+##Figure only of the partial dependence, for the supplementary materials
 pdp_data_plot %>% 
   ggplot(aes(x, y_hat))+
   geom_line(size = 1)+
@@ -611,9 +612,7 @@ ggsave(filename = "figures/supplementary/PDP_individual.png", height = 9, width 
 if(file.exists("data/processed/grade_attributes.csv") == TRUE) {
   print("files already downloaded")
 } else {
-  drive_download( file="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attributes.csv",
-                  path="data/processed/grade_attributes.csv",
-               overwrite = TRUE)
+  print("error, file not found. go to repository and download the data")
   }
 
 global_preds <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE) 
@@ -792,16 +791,13 @@ extrap_monthly <- jan_extrap %>%
   left_join(dec_extrap, by = "COMID")  
 
 
-  ggplot( aes(x=frac_int, fill=month))+
-  geom_density() 
-
   extrap_monthly %>% 
     pivot_longer(-COMID, values_to = "frac_int", names_to = "month") %>% 
     group_by(month) %>% 
-    summarise(per_above.8 = sum(frac_int >= .9) / n() )
+    summarise(per_above.9 = sum(frac_int >= .9) / n() )
   
   
-  
+#export the data  
 write_csv(extrap_monthly, "data/processed/interpolated_COMIDS.csv")
 
 

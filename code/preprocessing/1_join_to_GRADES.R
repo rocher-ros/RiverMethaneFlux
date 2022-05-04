@@ -386,7 +386,7 @@ grades <-  do.call(what = sf:::rbind.sf, args=list_shapes) %>% st_set_crs(4326)
 rm(list_shapes)
 gc()
 
-grades_properties <- grades[1:100,] %>% 
+grades_properties <- grades %>% 
   mutate(start_point = st_startpoint(.),
          mid_point = st_point_on_surface(.),
          end_point = st_endpoint(.),

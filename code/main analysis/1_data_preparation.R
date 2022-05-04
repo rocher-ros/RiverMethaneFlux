@@ -8,7 +8,7 @@
 
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive', 'lubridate')
+package_list <- c('tidyverse', 'lubridate')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -35,20 +35,20 @@ sites_df <- sites_df %>%
 grime_comids <- read_csv("data/processed/sites_meth_comid.csv") %>% 
   mutate(Site_Nid= as.character(Site_Nid))
 
-# Process all files ----
+
 sites_clean <- sites_df %>% 
   left_join(grime_comids, by="Site_Nid") %>% 
   drop_na(COMID)
 
 
 
-## attach the COMID to the concentration df and keep useful variables 
+## attach the COMID to the concentration df and keep useful variables. we also fix NAs from CH4mean to close to equilibrium
 conc_df_comids <- conc_df %>% 
   filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
   left_join(sites_clean, by="Site_Nid") %>% 
   dplyr::select(Site_Nid, `Aggregated?`, Channel_type, COMID, distance_snapped, slope_m_m, CH4mean, CO2mean,
                 date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  ) %>% 
-  mutate(CH4mean =ifelse(CH4mean < 0, 0.0001, CH4mean)) %>% 
+  mutate(CH4mean =ifelse(CH4mean < 0.0001, 0.0001, CH4mean)) %>% 
   drop_na(CH4mean)
 
 # Load GRADES with attributes ----
@@ -157,6 +157,18 @@ grimeDB_attributes_mon <- grimeDB_attributes %>%
                                  month(date) == 10 ~ tavg_oct,
                                  month(date) == 11 ~ tavg_nov,
                                  month(date) == 12 ~ tavg_dec),
+          runoff_month = case_when(month(date) == 1 ~ runoff_jan,
+                                 month(date) == 2 ~ runoff_feb,
+                                 month(date) == 3 ~ runoff_mar,
+                                 month(date) == 4 ~ runoff_apr,
+                                 month(date) == 5 ~ runoff_may,
+                                 month(date) == 6 ~ runoff_jun,
+                                 month(date) == 7 ~ runoff_jul,
+                                 month(date) == 8 ~ runoff_aug,
+                                 month(date) == 9 ~ runoff_sep,
+                                 month(date) == 10 ~ runoff_oct,
+                                 month(date) == 11 ~ runoff_nov,
+                                 month(date) == 12 ~ runoff_dec),
           sresp_month = case_when(month(date) == 1 ~ sresp_jan*365,
                                   month(date) == 2 ~ sresp_feb*365,
                                   month(date) == 3 ~ sresp_mar*365,
@@ -180,6 +192,3 @@ grimeDB_attributes_mon %>% filter(Site_Nid == "2597") %>%
 grimeDB_attributes_mon %>% 
   write_csv("data/processed/grimeDB_concs_with_grade_attributes.csv")  
 
-drive_upload(media = "data/processed/grimeDB_concs_with_grade_attributes.csv",
-             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grimeDB_concs_with_grade_attributes.csv",
-             overwrite = TRUE)

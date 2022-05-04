@@ -32,8 +32,7 @@ extrap_pols <- st_read( "data/processed/GIS/extrap_sites.shp") %>%
 meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) %>% 
   select(-contains("sd"))
 
-grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
-  dplyr::select(COMID, lon=lon_mid, lat = lat_mid, subarea)
+grades <- read_csv("data/processed/grades_coords.csv") 
 
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
   filter(`Aggregated?` == "No",
@@ -43,8 +42,7 @@ grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attribut
   group_by(COMID, month) %>% 
   summarise(lat= mean(lat),
             lon = mean(lon)) %>% 
-  mutate(labels = month.name[month],
-         labels = fct_relevel(labels, month.name)) %>% 
+  mutate(labels = month.name[month] %>% fct_relevel(month.name)) %>% 
   drop_na(lat) %>% 
   st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
   st_transform("+proj=eqearth +wktext") 
@@ -71,34 +69,40 @@ mountains <- read_sf("data/raw/gis/global_mountains/CMEC_Mountains_Enh2018.shp")
 buffers <- meth_hexes_avg %>% 
   mutate( 
     buffer_change = case_when(
-      runoff < 25 ~ -30000,
-      runoff >= 25 & runoff < 50 ~ -20000,
-      runoff >= 50 & runoff < 100 ~ -15000,
-      runoff >= 100 & runoff < 200 ~ -10000,
-      runoff >= 200 & runoff < 400 ~ -5000,
-      runoff >= 400 & runoff < 1000 ~ -2000,
-      runoff >= 1000  ~ 0,
-      is.na(ch4_mean) == TRUE ~ 0)
-  )
+      runoff < .005 ~ -40000,
+      runoff >= .005 & runoff < .02 ~ -30000,
+      runoff >= .02 & runoff < .04 ~ -20000,
+      runoff >= .04 & runoff < .06 ~ -12000,
+      runoff >= .06 & runoff < .1 ~ -8000,
+      runoff >= .1 & runoff < .5 ~ -6000,
+      runoff >= .5 & runoff < 1 ~ -3000,
+      runoff >= 1 & runoff < 1.5 ~ -2000,
+      runoff >= 1.5 & runoff < 2 ~ -1000,
+      runoff >= 2  ~ 0,
+      is.na(runoff) == TRUE ~ 0)
+  ) %>%
+  dplyr::select(buffer_change) %>% 
+  mutate( buffer_change = ifelse(is.na(buffer_change) == TRUE, 0, buffer_change)) %>% 
+  st_drop_geometry()
+
 
 
 #shrink the hexes by river area or runoff
-meth_hexes_avg <- meth_hexes_avg %>%
+meth_hexes_avg2 <- meth_hexes_avg %>%
   st_buffer( dist = buffers$buffer_change)
 
 
 # Map figures ----
 ## map of concentrations 
-map_ch4 <- ggplot() +
+map_ch4 <- 
+  ggplot() +
   geom_sf(
-    data = meth_hexes_avg, color = NA,
+    data = meth_hexes_avg2, color = NA,
     aes( fill = ch4_mean) )+
- # geom_sf(data=mountains, fill="gray20", size=.08, alpha=.1, color="gray20" )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
     direction = -1,
-    #trans = "pseudo_log", 
     name = "**CH<sub>4</sub> conc.** <br>(mmol m<sup>-3</sup>)")+
   coord_sf(xlim = c(-15000000, 16000000), ylim = c(-8600000, 8600000), expand = FALSE) +
   guides( fill = guide_colourbar(title.position = "top"))+
@@ -110,15 +114,15 @@ map_ch4 <- ggplot() +
         legend.key.height  = unit(.5, 'cm'),
         legend.key.width =  unit(.3, 'cm'))
 
+ggsave(map_ch4, filename = "figures/map.try.png", dpi= 1000, scale = 1.2)
 
 ## map of fluxes
 map_fch4 <- 
   ggplot()+
   geom_sf(
-    data = meth_hexes_avg, 
+    data = meth_hexes_avg2, 
     aes(fill = Fch4_mean*16/12), color = NA )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
-  #geom_sf(data=mountains, fill="gray20", size=.08, alpha=.1, color="gray20" )+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
     direction = -1,
@@ -133,10 +137,20 @@ map_fch4 <-
         legend.key.width =  unit(.3, 'cm'))
 
 
-#puth them together and add labels
+#put them together and add labels
 maps_combined <- map_ch4 / map_fch4 + plot_annotation(tag_levels = 'a')  & theme(plot.tag.position = c(0, 1))
 
-ggsave(maps_combined, filename = "figures/fig_maps.png", dpi= 1500, scale = 1.2)
+ggsave(maps_combined, filename = "figures/fig_maps.png", dpi= 1000, scale = 1.2)
+
+
+
+ggplot()+
+    geom_sf(
+      data = meth_hexes_avg2 %>% filter(runoff < 1), 
+      aes(fill =runoff), color = NA )+
+    scale_fill_viridis_c(
+      option = "magma", na.value = "gray", 
+      direction = -1)
 
 
 # maps of the extrapolated areas and CV of concentrations ----
@@ -560,11 +574,13 @@ sites_clean <- sites_df %>%
 conc_df_comids <- conc_df %>% 
   filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
   left_join(sites_clean, by="Site_Nid") %>% 
-  dplyr::select(Site_Nid, `Aggregated?`, Channel_type, COMID, Latitude, distance_snapped, slope_m_m, CH4mean, CO2mean,
-                date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  ) %>% 
+  dplyr::select(Site_Nid, Publication_Nid = Publication_Nid.x , `Aggregated?`, Channel_type, COMID,
+                Latitude, distance_snapped, slope_m_m, CH4mean, CO2mean,
+                date= Date_start, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  ) %>% 
   mutate(CH4mean =ifelse(CH4mean < 0, 0.0001, CH4mean)) %>% 
   drop_na(CH4mean)
 
+#Look at sites with highest concentrations
 conc_df_comids %>% 
   group_by(Site_Nid) %>% 
   summarise(CH4mean= median(CH4mean),
@@ -759,7 +775,7 @@ flux_sites %>%
   theme(axis.title.y = ggtext::element_markdown(), legend.position = "right")+
   facet_wrap(~System_size)
 
-ggsave("figures/supplementary/river_size_temp.png", width = 12)
+ggsave("figures/supplementary/river_size_temp.png", width = 12, scale = .7)
 
 diff_plot <- 
   flux_sites %>% 
@@ -802,13 +818,17 @@ flux_sites %>%
   theme_classic()+
   theme(axis.title.y = ggtext::element_markdown(), legend.position = "right")
 
-ggsave("figures/supplementary/ebullition_temp.png", scale = 1)
+ggsave("figures/supplementary/ebullition_temp.png", scale = .7)
 
 flux_comid %>% 
   filter(Eb_CH4_Flux_Mean > 0.00001,
          Diffusive_CH4_Flux_Mean > 0.0001) %>%
   filter(k_method == "chamber + conc") %>% 
   select(Site_Nid) %>% unique()
+
+flux_comid %>% 
+  filter(Eb_CH4_Flux_Mean > 0.00001) %>% 
+  count(Site_Nid)
 
 mycolors2 <- colorRampPalette(RColorBrewer::brewer.pal(8, "Paired"))(93)
 
@@ -898,16 +918,77 @@ ggplot(residuals_ebb)+
   geom_histogram(aes(.resid), bins=60)+
   theme_classic()
   
+sites_with_many_obs <- conc_df_comids %>% 
+  filter(CH4mean > 0.0005) %>% 
+  group_by(COMID = as.factor(COMID)) %>% 
+  mutate(n_obs = n(), 
+         month= month.abb[month(date)]) %>% 
+  filter(n_obs > 150) %>% 
+  arrange(n_obs) %>% 
+  ungroup() %>% 
+  mutate(month = fct_relevel(month, month.abb),
+         COMID = fct_reorder(COMID, desc(n_obs))) 
 
+  labs_plot_n_obs <- sites_with_many_obs %>% 
+  group_by(COMID) %>% 
+  slice_max( Publication_Nid) %>% 
+  left_join(papers_df, by = "Publication_Nid" ) %>%  
+  group_by(COMID) %>% 
+  summarise( Publication_Nid= first(Publication_Nid), 
+             n_obs= first(n_obs), Authorlastname = first(Authorlastname)) %>% 
+  mutate(label = paste0(COMID," \n(", Authorlastname, ")")) %>% 
+  arrange(desc(n_obs))
+
+ggplot(sites_with_many_obs, aes(COMID, CH4mean, color= month ))+
+  geom_jitter(alpha = .3)+
+  geom_text(data=labs_plot_n_obs, aes(COMID, 0.0001, label = n_obs), color = "black")+
+  stat_summary_bin(aes(group= month, fill=month ), fun.data = "mean_sd", color= "black", size = 1, shape =21)+
+  scale_y_log10(labels=scales::number, breaks = c(0.001, 0.01, 0.1, 1, 10, 100))+
+  scale_color_viridis_d(name = "")+
+  scale_fill_viridis_d(name = "")+
+  scale_x_discrete(labels = labs_plot_n_obs$label, guide = guide_axis(angle = 45))+
+  labs(x = "**GRADES river reach ID** <br> (main author)", y = "**CH<sub>4</sub> concentration** <br> (mmol m^-3)")+
+  theme_classic()+
+  theme(legend.position = "top", axis.title.y = ggtext::element_markdown(),
+        axis.title.x = ggtext::element_markdown())+
+  guides(color=guide_legend(nrow=1))
  
-    
-    
-## Maps of important features 
+ggsave("figures/supplementary/sites_with_many_obs.png", width = 10, height = 5)
 
+
+time_series <- sites_with_many_obs %>% 
+  filter(COMID == 24006204, Publication_Nid == 2320) %>% 
+  ggplot(aes(month, CH4mean, color=Site_Nid, group = Site_Nid))+
+  geom_point(alpha=.6)+
+  geom_smooth( se= FALSE)+
+  geom_point(data = . %>% group_by(Site_Nid, month) %>% summarise(CH4mean = mean(CH4mean)),
+             aes(month, CH4mean, color=Site_Nid), size=5)+
+  scale_color_brewer(palette = "Set2", guide = "none" )+
+  scale_y_log10(labels=scales::number, breaks = c( 0.01, 0.1, 1, 10, 100), limits= c(0.01, 100))+
+  theme_classic()+
+  labs(x="", y= expression(CH[4]~concentration~(mmol~m^-3)), title= "Temporal variability")
+
+spatial_surveys <- sites_with_many_obs %>% 
+  filter(COMID == 24006204, Publication_Nid == 2279) %>% 
+  mutate(Site_Nid = as.numeric(Site_Nid)) %>% 
+  ggplot(aes(COMID, CH4mean, color=Site_Nid))+
+  geom_jitter(alpha = .8, size = 3)+
+  scale_color_distiller(type = "seq", palette = "Reds",  guide = "none" )+
+  scale_y_log10(labels=scales::number, breaks = c( 0.01, 0.1, 1, 10, 100), limits= c(0.01, 100))+
+  theme_classic()+
+  labs(x = "", y = "", title= "Spatial variability")+
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank())
+
+time_series + spatial_surveys +  plot_layout(widths = c(2.5, 1) )
+
+ggsave("figures/supplementary/krycklan_example.png",  width = 7, height = 5)
+
+    
+## Maps of important features ----
 important_pols <- st_read( "data/processed/GIS/important_features.shp") %>% 
   st_transform("+proj=eqearth +wktext") %>% 
   mutate(prec_yr = log(prec_yr))
-
 
 
 ggplot(important_pols, aes(fill=slope))+
@@ -915,10 +996,7 @@ ggplot(important_pols, aes(fill=slope))+
   scale_fill_viridis_c()
 
 #devtools::install_github("marcosci/layer")
-
 library(layer)
-
-
 
 tilt_landscape_1 <- tilt_map(important_pols)
 tilt_landscape_2 <- tilt_map(important_pols,  y_shift = -15000000)

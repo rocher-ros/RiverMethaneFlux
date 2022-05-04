@@ -635,3 +635,103 @@ biome_good <- bind_rows(biome_withdata %>% st_drop_geometry(),
 
 
 write_csv(biome_good, "data/raw/gis/GRADES_attributes/biomes.csv")
+
+
+
+###### 
+library(terra)
+library(lubridate)
+
+sf::sf_use_s2(FALSE)
+
+grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  dplyr::select(COMID, lon = lon_mid, lat = lat_mid) %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326)
+
+
+runoff <- terra::rast("data/raw/gis/runoff/GRUN_v1_GSWP3_WGS84_05_1902_2014.nc")
+
+runoff_index <- tibble(names = names(runoff),
+                     date = as.Date(terra::time(runoff)),
+                     year= year(date),
+                     month = month(date))
+
+dates_to_extract <- runoff_index %>% 
+  filter(year > 1984 )
+
+
+
+runoff_jan <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 1] ) %>% mean() 
+runoff_feb <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 2] ) %>% mean() 
+runoff_mar <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 3] ) %>% mean() 
+runoff_apr <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 4] ) %>% mean() 
+runoff_may <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 5] ) %>% mean() 
+runoff_jun <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 6] ) %>% mean() 
+runoff_jul <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 7] ) %>% mean() 
+runoff_aug <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 8] ) %>% mean() 
+runoff_sep <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 9] ) %>% mean() 
+runoff_oct <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 10] ) %>% mean() 
+runoff_nov <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 11] ) %>% mean() 
+runoff_dec <- subset(runoff, dates_to_extract$names[dates_to_extract$month == 12] ) %>% mean() 
+
+year_runoff <- mean(runoff_jan,
+            runoff_feb,
+            runoff_mar,
+            runoff_apr,
+            runoff_may,
+            runoff_jun,
+            runoff_jul,
+            runoff_aug,
+            runoff_sep,
+            runoff_oct,
+            runoff_nov,
+            runoff_dec)
+
+plot(year_runoff)
+
+dat_out <- tibble(COMID = grades$COMID, 
+                  runoff_jan = terra::extract( runoff_jan, st_coordinates(grades))$mean,
+                  runoff_feb = terra::extract( runoff_feb, st_coordinates(grades))$mean,
+                  runoff_mar = terra::extract( runoff_mar, st_coordinates(grades))$mean,
+                  runoff_apr = terra::extract( runoff_apr, st_coordinates(grades))$mean,
+                  runoff_may = terra::extract( runoff_may, st_coordinates(grades))$mean,
+                  runoff_jun = terra::extract( runoff_jun, st_coordinates(grades))$mean,
+                  runoff_jul = terra::extract( runoff_jul, st_coordinates(grades))$mean,
+                  runoff_aug = terra::extract( runoff_aug, st_coordinates(grades))$mean,
+                  runoff_sep = terra::extract( runoff_sep, st_coordinates(grades))$mean,
+                  runoff_oct = terra::extract( runoff_oct, st_coordinates(grades))$mean,
+                  runoff_nov = terra::extract( runoff_nov, st_coordinates(grades))$mean,
+                  runoff_dec = terra::extract( runoff_dec, st_coordinates(grades))$mean) 
+
+dat_out %>% filter(is.na(runoff_jan) == TRUE)
+
+#we separate the completed ones with the missing ones
+runoff_withdata <-  dat_out %>% 
+  drop_na(runoff_jul) %>% 
+  left_join(grades) %>% 
+  st_sf()
+
+runoff_missing <- dat_out %>%
+  filter_all(any_vars(is.na(.))) %>% 
+  dplyr::select(COMID)  %>% 
+  left_join(grades) %>% 
+  st_sf()
+
+
+#find nearest point with data
+nearest <- st_nearest_feature(runoff_missing, runoff_withdata)
+
+
+runoff_filled <- cbind(runoff_missing, st_drop_geometry(runoff_withdata)[nearest,]) %>% 
+  dplyr::select(- COMID.1) 
+
+#join with both filled datasets
+runoff_good <- bind_rows(runoff_withdata %>% st_drop_geometry(), 
+                        runoff_filled %>% st_drop_geometry()) %>% 
+  rowwise() %>% 
+  mutate(runoff_yr = mean(runoff_jan:runoff_dec))
+
+runoff_good %>% filter(is.na(runoff_jul) == TRUE)
+
+
+write_csv(runoff_good, "data/raw/gis/GRADES_attributes/runoff.csv")
