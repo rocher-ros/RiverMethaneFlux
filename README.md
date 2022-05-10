@@ -1,28 +1,31 @@
 # Global estimate of Riverine Methane Flux
 
-Ongoing project trying to quantify CH4 emissions from rivers globally and monthly.
+Project that quantifies CH4 emissions from rivers globally and monthly. This repository contains the code to process raw file, model CH4 concentrations and estimate CH4 emissions from rivers, as well as to produce the acompanying figures. The manuscript associated to this project is currently in preparation.
+Main and corresponding author is Gerard Rocher-Ros (g.rocher.ros@gmail.com), which you can contact for questions.
 
 ## Setup
+Currently the datasets are private in a google drive, so you need access to run the code in this repository. Code is in the `code/` folder, with two categories: 
+- Folder `preprocessing/` for all the GIS processing to obtain all spatial predictors for the GRADES River network. This analysis requires many large files and will be available by request.
+- Folder `main analysis/` to reproduce the modelling, main results an figures in the paper.
 
-Currently the datasets are private in a google drive, so you need access to run the code in this repository. Code is in the `code/` folder. A summary of the code chunks is as follows. Each script is self-enclosed so welcome to jump in at any of them.
+## Preprocessing
+The folder `preprocessing/` contains four scripts that do the following:
+- Script `1_join_to_GRADES.R` downloads the GRADES river network database and attaches the sites to the corresponding river reach.
+- Script `2_new_preds_to_GRADES.R` assigns other predictors to their corresponding GRADES dataset.
+- Script `3_hydro_and_k.R` calculates average monthly discharge for GRADS, estimates velocity and the gas transfer velocity.
+- Script `4_all_attributes_to_GRADES.R` puts all the attributes of each GRADES reach into one file for later use in the modelling.
 
--   Script 1 downloads the hydrology layers and gets the IDs for the methane sites.
--   Script 2 obtains some new attributes: land cover, groundwater table depth and nutrient fluxes.
--   Script 3 combines all attributes into two files, one for the modelling with only the sites with CH4 concentrations and another with the 2 million catchments for upscaling.
--   Script 4 is the random forest modelling to predict CH4 concentrations globally.
--   Script 5 is to extract seasonal hydrological parameters and estimate k.
--   Script 6 is to calculate fluxes for all GRADES reaches and extrapolate to smaller streams.
--   Script 7 is to do some maps and figures.
+## Main analysis
+The folder `main analysis/`  contains the following scripts:
+- `1_data_preparation.R`, which downloads the datasets needed for the analysis, and attaches all the attributes to the Methane database (GRiMeDB).
+- `2_CH4_model_assessment.R`, prepares the data and models CH4 concentrations using random forets models. This script assesses the model performance and produces the figures related to the model.
+- `3_CH4_model_predict.R`, uses the random forets model to predict CH4 concentrations to all river reaches in GRADES.
+- `4_CH4_upscaling.R`, uses the predicted CH4 concentrations and the hydrological model to upscale CH4 emissions globally.
+- `5_GIS_processing.R`, processess the output files onto shapefiles for further outputs as well as for visualization.
+- `6_figures.R` uses the model outputs and shapefiles produced to do the main figures of the manuscript.
 
-## Modelling
 
-### Pre-processing
 
-The predictors selected are shown below. Several have been removed due to high correlation among other ones (e.g. GPP and NPP, heterotrophic soil respiration and total soil respiration, several soil properties...)
-
-![](figures/histograms_transformed.png)
-
-### Model performance
 
 
 
