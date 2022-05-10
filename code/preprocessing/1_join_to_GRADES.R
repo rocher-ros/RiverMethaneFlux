@@ -1,9 +1,15 @@
+########################################.
+#### R script to download the GRADES river network and find the corresponding reaches in GRiMeDB
+#### Author: Gerard Rocher-Ros
+#### Last edit: 2022-04-22
+########################################.
+
+
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'RCurl', 'sf', 'XML', 'countrycode', 'leaflet', 'googledrive', 'lwgeom')
+package_list <- c('tidyverse', 'RCurl', 'sf', 'XML', 'countrycode', 'leaflet', 'lwgeom')
 
-
-# Check if there are any packacges missing
+# Check if there are any packages missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
 
 # If we find a package missing, install them
@@ -13,10 +19,15 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 lapply(package_list, require, character.only = TRUE)
 
 
+# Download files ----
 
-# Download GRADES river network from the server ----
+# Download the Global River Methane Database (GRiMeDB) from doi: xxxx 
 
-## Prepare the things for the download ----
+
+#load the methane DB 
+load(file.path("data", "MethDB_tables_converted.rda"))
+
+## Prepare the things for the download of GRADES ----
 dir.create("data/raw/grades")
 
 url = "http://hydrology.princeton.edu/data/mpan/MERIT_Basins/MERIT_Hydro_v00_Basins_v01/level_01/"
@@ -51,16 +62,6 @@ if(all(file.exists(paste("data/raw/grades", files, sep="/"))) == TRUE){
 
 ## Prepare the files for processing ----
 
-# Download the methane database
-drive_download(
-  "SCIENCE/PROJECTS/RiverMethaneFlux/methane/MethDB_tables_converted.rda",
-  path = "data/MethDB_tables_converted.rda",
-  overwrite = TRUE
-)
-#load the methane DB 
-load(file.path("data", "MethDB_tables_converted.rda"))
-
-
 #select the sites, and make a new column to get the continent name. This will be the way to break the processing in pieces
 sites_meth <- sites_df %>%  
   mutate(lat = ifelse(is.na(lat_new) == TRUE, Latitude, lat_new),
@@ -84,10 +85,13 @@ sites_meth <- sites_df %>%
   st_as_sf( coords = c("lon", "lat"), crs = 4326)
 
 #check if there are some without continent
-sites_meth %>% filter(is.na(continent) == TRUE) %>% print(n=60)
+sites_meth %>% 
+  filter(is.na(continent) == TRUE) %>% 
+  print(n=60)
 
 
-#get the files than end in .shp, and separate them in catchments and networks
+#get the files than end in .shp, and separate them in catchments and networks. 
+#This is becase we want to attach sites to the closest reach
 files <- list.files("data/raw/grades")[grepl(".shp$", list.files("data/raw/grades"))]
 
 shape_files <- paste("data/raw/grades", files[grepl(".shp$", files)], sep="/") 
@@ -106,9 +110,9 @@ file.size(shapes_catchments)/1e+6
 # read the GRADES shapefile 
 africa <- read_sf(shapes_rivers[1]) %>% st_set_crs(4326)
 
-sites_in_africa <- sites_meth %>% filter(continent == "Africa")
-
-
+#find which sites in the DB are in Africa
+sites_in_africa <- sites_meth %>% 
+  filter(continent == "Africa")
 
 #to double check, plot 1000 of the sites randomly selected
 sample_n(africa, 1000) %>% 
@@ -122,7 +126,8 @@ nearest <- st_nearest_feature(sites_in_africa, africa)
 system("rundll32 user32.dll,MessageBeep -1")
 
 #get the distance that has been snapped as a QAQC
-distance_snapped <- st_distance(sites_in_africa, africa[nearest,], by_element = TRUE) %>% as.vector()
+distance_snapped <- st_distance(sites_in_africa, africa[nearest,], by_element = TRUE) %>% 
+  as.vector()
 
 summary(distance_snapped)
 
@@ -135,7 +140,6 @@ sites_in_africa <- sites_in_africa %>%
          order = africa[nearest,]$strmOrder,
          NextDownID = africa[nearest,]$DSLINKNO, 
          distance_snapped = distance_snapped) 
-
 
 
 #launch a leaflet with the sites, to see how it went
@@ -154,8 +158,8 @@ rm(africa)
 # read the GRADES shapefile 
 europe <- read_sf(shapes_rivers[2]) %>% st_set_crs(4326)
 
-
-sites_in_europe <- sites_meth %>% filter(continent %in% c("Europe"))
+sites_in_europe <- sites_meth %>% 
+  filter(continent %in% c("Europe"))
 
 #to double check, plot 1000 of the sites randomly selected
 sample_n(europe, 2000) %>% 
@@ -170,7 +174,8 @@ nearest <- st_nearest_feature(sites_in_europe, europe)
 system("rundll32 user32.dll,MessageBeep -1")
 
 #get the distance that has been snapped as a QAQC
-distance_snapped <- st_distance(sites_in_europe, europe[nearest,], by_element = TRUE) %>% as.vector()
+distance_snapped <- st_distance(sites_in_europe, europe[nearest,], by_element = TRUE) %>% 
+  as.vector()
 
 summary(distance_snapped)
 
@@ -205,7 +210,8 @@ asia_south <- read_sf(shapes_rivers[4]) %>% st_set_crs(4326)
 asia <- rbind(asia_north, asia_south)
 rm(asia_north, asia_south)
 
-sites_in_asia <- sites_meth %>% filter(continent %in% "Asia")
+sites_in_asia <- sites_meth %>% 
+  filter(continent %in% "Asia")
 
 #to double check, plot 1000 of the sites randomly selected
 sample_n(asia, 5000) %>% 
@@ -220,7 +226,8 @@ nearest <- st_nearest_feature(sites_in_asia, asia)
 system("rundll32 user32.dll,MessageBeep -1")
 
 #get the distance that has been snapped as a QAQC
-distance_snapped <- st_distance(sites_in_asia, asia[nearest,], by_element = TRUE) %>% as.vector()
+distance_snapped <- st_distance(sites_in_asia, asia[nearest,], by_element = TRUE) %>% 
+  as.vector()
 
 summary(distance_snapped)
 
@@ -252,7 +259,8 @@ rm(asia)
 # read the GRADES shapefile 
 oceania <- read_sf(shapes_rivers[5]) %>% st_set_crs(4326)
 
-sites_in_oceania <- sites_meth %>% filter(continent %in% "Oceania")
+sites_in_oceania <- sites_meth %>% 
+  filter(continent %in% "Oceania")
 
 #to double check, plot 1000 of the sites randomly selected
 sample_n(oceania, 2000) %>% 
@@ -267,7 +275,8 @@ nearest <- st_nearest_feature(sites_in_oceania, oceania)
 system("rundll32 user32.dll,MessageBeep -1")
 
 #get the distance that has been snapped as a QAQC
-distance_snapped <- st_distance(sites_in_oceania, oceania[nearest,], by_element = TRUE) %>% as.vector()
+distance_snapped <- st_distance(sites_in_oceania, oceania[nearest,], by_element = TRUE) %>% 
+  as.vector()
 
 summary(distance_snapped)
 
@@ -305,7 +314,8 @@ greenland <- read_sf(shapes_rivers[9]) %>% st_set_crs(4326)
 america <- rbind(south_america, north_america, north_america2, greenland)
 rm(south_america, north_america, north_america2, greenland)
 
-sites_in_america <- sites_meth %>% filter(continent %in% "Americas")
+sites_in_america <- sites_meth %>% 
+  filter(continent %in% "Americas")
 
 #to double check, plot 1000 of the sites randomly selected
 sample_n(america , 2000) %>% 
@@ -360,24 +370,16 @@ sites_meth_comid <- rbind(sites_in_africa, sites_in_america, sites_in_asia, site
 
 write_csv(sites_meth_comid, "data/processed/sites_meth_comid.csv")
 
-# upload the csv file to google drive
-  drive_upload(media = "data/processed/sites_meth_comid.csv" ,
-               path = "SCIENCE/PROJECTS/RiverMethaneFlux/methane/sites_meth_comid.csv")
 
-sites_meth_comid %>% 
-  ggplot()+
-  geom_histogram(aes(distance_snapped), bins=60)+
-  facet_wrap(~continent, scales = "free")+
-  theme_bw()
+# Also, get point coordinates for all segments in grades ----
+# I will save the coordinates from the bottom, mid and top of each grades river reach. 
 
-
-## last thing,  get point coordinates for all segments in grades
-
-
+#Get the files needed
 files <- list.files("data/raw/grades")[grepl(".shp$", list.files("data/raw/grades"))]
 
 shape_files <- paste("data/raw/grades", files[grepl(".shp$", files)], sep="/") 
 
+#select the files with the river network
 shapes_rivers <- shape_files[grepl("riv", shape_files)]
 
 list_shapes <- lapply(shapes_rivers, st_read)
@@ -386,6 +388,7 @@ grades <-  do.call(what = sf:::rbind.sf, args=list_shapes) %>% st_set_crs(4326)
 rm(list_shapes)
 gc()
 
+#save those main properties, and calculate the subcatchment area of each river reach
 grades_properties <- grades %>% 
   mutate(start_point = st_startpoint(.),
          mid_point = st_point_on_surface(.),
@@ -402,9 +405,7 @@ grades_properties <- grades %>%
                 lat_mid, lon_mid, lat_end, lon_end, continent)
 
 
-
+#save as a file
 write_csv(grades_properties, "data/raw/gis/GRADES_attributes/grades_coords.csv")
 
-# upload the csv file to google drive
-drive_upload(media = "data/raw/gis/GRADES_attributes/grades_coords.csv" ,
-             path = "SCIENCE/PROJECTS/RiverMethaneFlux/gis/grades_coords.csv")
+

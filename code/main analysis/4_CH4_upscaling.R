@@ -1,12 +1,12 @@
-# Info ------
-# Author: Gerard Rocher-Ros, modified from Shaoda Liu
-# Script upscale CH4 emissions in rivers globally.
+########################################.
+#### Script upscale CH4 emissions in rivers globally.
+#### Author:  Gerard Rocher-Ros, modified from Shaoda Liu
+#### Last edit: 2022-05-10
+########################################.
 
-
-
-# 0. Load  and install packages ----
+# Load  and install packages and functions ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive')
+package_list <- c('tidyverse')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -36,12 +36,12 @@ get_Ch4eq <- function(temperature, elevation){
   return(EquilSaturation)
 }
 
-#time dryout
+# function to estimate dryout time based on Q, source: https://doi.org/10.1073/pnas.2106322119
 timedryout_calculater <- function(Q) {
   tdryout = 1 / (1 + exp(11 + 4 * log(Q)))
 }
 
-# 1. Load files ----
+# Load files ----
 
 # load file with discharge and k data 
 hydro_k <- read_csv("data/processed/q_and_k.csv")
@@ -56,9 +56,10 @@ meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "
 
 gc()
 
-#calculate excess ch4 relative to the atmosphere, based on water temperature and elevation
+# Calculate excess methane in water for flux calcs ----
+
+# calculate excess ch4 relative to the atmosphere, based on water temperature and elevation
 df <- hydro_k %>% 
-  #mutate(across(ends_with("k"), ~if_else(.x >= 35, 35, .x))) %>% #line of code to cap k at 35
   left_join(meth_concs, by="COMID") %>% 
   mutate(Jan_ch4ex = Jan_ch4 - get_Ch4eq(Jan_Tw + 273.15, elev),
          Feb_ch4ex = Feb_ch4 - get_Ch4eq(Feb_Tw + 273.15, elev),
@@ -87,7 +88,7 @@ df <- hydro_k %>%
 
 rm(hydro_k, meth_concs)
 
-
+# Estimate river width and dryout seasonally ----
 #calc annual mean width, and trim the quantiles of Qcv
 df <- df  %>% 
   mutate(uparea = if_else(COMID %in% c(61000003,31000001 ), 35, uparea), #those sites have wrong area
@@ -145,7 +146,8 @@ df <- df %>%
 for(mon in month.abb){
   df[df[, paste0(mon, 'Qmean')] >= 60, paste0(mon, 'timedryout')] = 0
 }
-
+# Extrapolation to small streams ----
+## Find larger basins for all GRADES to do the extrapolation
 #### generate working basins for SO extrapolation####
 wkbasins <- df %>% 
   count( wkbasin) %>% 
@@ -186,6 +188,7 @@ wkbasins <- wkbasins %>%
   left_join( prectemp, by = 'wkbasin')
 rm(prectemp)
 
+## Here we do the extrapolation ----
 # Extrapolation of stream orders, surface area and fluxes for the wkbasins, for each month 
 for(i in 1:78){
   print(paste0('Processing the ', i, ' basin ...'))
@@ -349,9 +352,7 @@ for(i in 1:78){
       r2_ephemArea_ray13 <- NA
       totEphemArea_2_ray13 <- NA
     }
-    
-    
-    
+ 
     extrap <- tibble(wkbasin  = as.character(wkbasins[i,]$wkbasin),
                      strmOrder = width_extrap$strmOrder,
                      width_m = width_extrap$width_m,
@@ -421,6 +422,9 @@ for(i in 1:78){
 #remove everything except the useful stuff
 rm(list = setdiff(ls(), c("df", "basinArea" )))
 gc()
+
+
+# Do the proper upscaling of methane fluxes ----
 
 ####replacing yeaWidth with GRWL width where available 
 GRWLwidth <- read_csv('data/processed/upscaling_extra_data/GRWLwidthHydroBASIN4_30mplus.csv') %>% 
@@ -649,11 +653,9 @@ total_fluxes <- df %>%
          Dec_ephemarea_m2 = Length*DecWidth*(1-Dectimedryout)*(1-Dec_iceCov) + Dec_totEphemArea_extrap/1e+6 ) %>% 
   dplyr::select(COMID, runoffFL, Jan_ch4F:Dec_ch4E_sd_reach, Jan_ch4E_extrap:Dec_ephemarea_m2, Jan_iceCov:Dec_iceCov )
 
-
-
 names(total_fluxes)  
 
-#now get the estimate. For that, do the sum of the measured + extrapolated fluxes, for all months
+## now get the estimate. For that, do the sum of the measured + extrapolated fluxes, for all months ----
 total_fluxes %>% 
   select(COMID, ends_with(c("ch4E_extrap", "ch4E_reach"))) %>% 
   pivot_longer(-COMID, values_to = "flux", names_to = "type") %>% 
@@ -669,20 +671,14 @@ total_fluxes %>%
 
 
 
-
+## Export file ----
 total_fluxes %>% 
   select(COMID:Dec_ch4F, Jan_ch4F_cv:Dec_ch4E_reach, Jan_ch4E_extrap:Dec_ch4E_extrap,
          Jan_area_m2:Dec_ephemarea_m2, Jan_iceCov:Dec_iceCov ) %>% 
   write_csv( "data/processed/grades_ch4_fluxes.csv")
 
 
-#upload to drive
-drive_upload(media = "data/processed/grades_ch4_fluxes.csv",
-             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grades_ch4_fluxes.csv",
-             overwrite = TRUE)
-
-
-#TABLE SM
+#TABLE for the SM
 df %>% 
   group_by(strmOrder) %>% 
   summarise(n = n(),

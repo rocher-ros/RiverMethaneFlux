@@ -1,7 +1,8 @@
-# Info ------
-# Author: Gerard Rocher-Ros
-# Script to model CH4 concentrations in rivers globally.
-# Part 1 is to clean and transform data needed for the model
+########################################.
+#### R script to model CH4 concentrations in rivers and assess model performance and important variables
+#### Author: Gerard Rocher-Ros
+#### Last edit: 2022-04-22
+########################################.
 
 
 # 0. Load  and install packages ----
@@ -35,21 +36,20 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 # 3. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
 #    Thermogenically affected, Ditches
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
-  filter(`Aggregated?` == "No", distance_snapped < 50000,
+  filter(`Aggregated?` == "No", distance_snapped < 10000,
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
-  mutate( month=month(date)) %>% 
+  mutate( month = month(date)) %>% 
   dplyr::select( COMID, Site_Nid, CH4mean, month, GPP_yr:month, 
           -c(Channel_type, `Aggregated?`, date_end, date, area, T_ECE, S_ECE, slope,
              temp_month, WaterTemp_actual, WaterTemp_est, discharge_measured)) 
 
 colnames(grimeDB_attributes)
 
-
-  
+# file to have nicer names in the variables, to use later
 labeller_vars <- read_csv("data/processed/variables_names.csv") %>% 
   mutate(label=str_replace(label, "9", ";"))
 
-# Explore the raw data and process before the modelling
+# 2. Explore the raw data and process before the modelling ----
 
 # we will log transform those to start with
 vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
@@ -65,8 +65,8 @@ variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S
 
 #dataset with some variables log transformed
 grimeDB_attr_trans <- grimeDB_attributes %>%
-  mutate(across(.cols=all_of(vars_to_log), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
-  rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
+  mutate(across(.cols = all_of(vars_to_log), ~log(.x + .1))) %>%  #log transform those variables, shift a bit from 0 as well
+  rename_with( ~ str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
 
 #Do  some histograms with the log transformed variables
@@ -82,8 +82,6 @@ grimeDB_attr_trans %>%
   theme(strip.text = ggtext::element_markdown())
 
 ggsave("figures/supplementary/histograms_variables.png", width=16, height = 12)
-
-
 
 #pearson correlations for CH4 with the predictors
 corr_ch4 <- grimeDB_attr_trans %>% 
@@ -102,13 +100,12 @@ ggsave("figures/supplementary/correlations_predictors.png", width=16, height = 1
 #check the coefficients in the console
 corr_ch4 %>% 
   arrange(desc(abs(Log_CH4mean))) %>% 
-  print(n=50)
-
+  print(n = 50)
 
 #get the r coefficients from the df for later plotting
 vars_for_plot <- corr_ch4 %>% 
   arrange(desc(abs(Log_CH4mean))) %>% 
-  mutate(predictor=fct_reorder(term, desc(abs(Log_CH4mean)))) %>% 
+  mutate(predictor = fct_reorder(term, desc(abs(Log_CH4mean)))) %>% 
   select(-term) %>% 
   filter(!predictor %in% c("COMID", "Site_Nid", "month"))
 
@@ -117,20 +114,20 @@ vars_for_plot <- corr_ch4 %>%
 # Showing a loess fit to capture potential nonlinearities that might be useful to assess. don't run it often as it takes a while...
  plot_correlations <- grimeDB_attr_trans %>% 
   pivot_longer(all_of(vars_for_plot$predictor), names_to = "predictor", values_to = "value" ) %>% 
-  mutate(predictor=fct_relevel(predictor, levels(vars_for_plot$predictor))) %>% 
+  mutate(predictor = fct_relevel(predictor, levels(vars_for_plot$predictor))) %>% 
   ggplot(aes(value, Log_CH4mean))+
   geom_hex(bins = 30) +
   geom_smooth(method = "loess", se=FALSE, color="red3")+
   geom_text( data = vars_for_plot, 
-             mapping = aes(x = Inf, y = Inf, label = paste("r=",round(Log_CH4mean,2))), hjust   = 3.5, vjust   = 1.5, color="red")+
+             mapping = aes(x = Inf, y = Inf, label = paste("r=", round(Log_CH4mean,2))), hjust = 3.5, vjust = 1.5, color="red")+
   theme_classic()+
   scale_fill_continuous(type = "viridis", trans = "log10")+
   facet_wrap(~predictor, scales='free')
 
  
-ggsave(filename= "figures/supplementary/correlations.png", plot=plot_correlations, width = 18, height = 12)
+ggsave(filename = "figures/supplementary/correlations.png", plot = plot_correlations, width = 18, height = 12)
 
-# 2.  RF model using tidymodels ----
+# 3.  RF model using tidymodels ----
  
 #Links I have been looking at for this: 
 # https://www.tidymodels.org/start/recipes/
@@ -138,7 +135,7 @@ ggsave(filename= "figures/supplementary/correlations.png", plot=plot_correlation
 # https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/
 
 
-##2.1 parameter tuning  for the RF, takes several hours so welcome to skip it ----
+## 3.1 parameter tuning  for the RF, takes many hours so welcome to skip it ----
 ## First run will be with the model with average values by COMID, to see the broad performance and tune RF parameters
  #remove variables that are highly correlated
  data_for_model <-  grimeDB_attr_trans %>%
@@ -243,12 +240,11 @@ best_auc <- select_best(regular_res, "rmse")
 best_auc
 
 
-## 2.2  Run the models ----
-#with the tuned parameters obtained with thw whole dataset
+## 3.2  Run the models ----
+# with the tuned parameters obtained with the whole dataset
 # ref: https://stackoverflow.com/questions/62687664/map-tidymodels-process-to-a-list-group-by-or-nest
 
-#Custom function to map it over month, with the parameters obtained from the tuning
-
+# Custom function to map it over month, with the parameters obtained from the tuning
 # First setup of the RF model
 
 n.cores= parallel::detectCores()-1
@@ -261,13 +257,13 @@ rf_mod <-
   set_mode("regression") %>%
   set_engine("ranger", importance="permutation", num.threads = n.cores)
 
-#prepare a workflow with it to feed into the function
+# prepare a workflow with it to feed into the function
 wf <-
   workflow() %>%
   add_model(rf_mod)
 
 
-## big function of model fitting and predicting
+# big function of model fitting and predicting
 predict_RF_grime <- function(df) {
   
   df <- df %>% dplyr::select(-month)
@@ -338,7 +334,8 @@ monthly_models <- lst(
           model_fit = model_out[2]) %>% 
   dplyr::select(-data, -model_out)
 
-#plot them. first we do nicer labels for the months
+## Plot model performance ----
+# first we do nicer labels for the months
 labelled_months <- tibble(month_label = tolower(month.abb), labels = month.name)
 
 #extract the model predicition data for plotting model performance
@@ -403,6 +400,7 @@ ggplot(monthly_models_unnested, aes( x=Log_CH4mean-.pred))+
         strip.background = element_rect(fill="white"),
         strip.text = element_text(size=12))
 
+## Assess variable importance ----
 #variable importance. make a simple function to map through the df
 get_vi_vals <- function(data){
   data %>% 
@@ -437,7 +435,7 @@ vi_monthly_mean <- vi_monthly %>%
   arrange(desc(Importance)) %>% 
   mutate(label= factor(label, unique(label)))
 
-
+#plot for the variable imporantance
 vi_plot <- ggplot(vi_monthly,  aes(x = Importance, y = reorder(label, sqrt(Importance), FUN = mean)))+
   stat_summary( aes(fill = type), color=NA, geom="bar", fun="mean", alpha=.8)+
   stat_summary(fun.data = mean_sd, geom = "linerange", size=1.5, alpha=.6)+
@@ -447,11 +445,11 @@ vi_plot <- ggplot(vi_monthly,  aes(x = Importance, y = reorder(label, sqrt(Impor
   labs(y="", fill="Category")+
   theme(legend.position = c(.9,.15), axis.text.y =ggtext::element_markdown(), legend.title =element_text(face="bold") )
 
-## run the data on the whole dataset, not nesting by month. This is to do PDPs ----
+## Partial dependence of the variables in the model ----
+
 set.seed(123)
 
-
-#Run the model yearly
+#Run the model with yearly average for this
 yearly_model <- grimeDB_attr_trans %>%
   select(-biome_label) %>% 
   group_by(COMID) %>% 
@@ -476,6 +474,7 @@ explainer_rf <- explain_tidymodels(
   label = "random forest"
 )
 
+#get the partial dependences, it can take a while, like 1-2h
 pdp_rf <- model_profile(explainer_rf, N = NULL)
 
 pdp_data_plot <- pdp_rf$agr_profiles %>% 
@@ -488,13 +487,11 @@ pdp_data_plot <- pdp_rf$agr_profiles %>%
          ) %>% 
   drop_na(y_hat) 
 
-
-
 ##partial dependence plot skeleton, to be used below
 pdp_plot <- pdp_data_plot %>% 
   ggplot(aes(x, y_hat, color=type))+
   geom_line(size=1)+
-  scale_color_manual(values = c("darkgreen", "dodgerblue4", "brown4", "darkgoldenrod4", "gray40", "chocolate4"))+ #c("forestgreen", "dodgerblue3","brown3", "darkgoldenrod3",   "gray60", "chocolate")
+  scale_color_manual(values = c("darkgreen", "dodgerblue4", "brown4", "darkgoldenrod4", "gray40", "chocolate4"))+ 
   facet_grid( scales = "free", rows = vars(label))+
   theme_classic()+
   labs(x="", y="") +
@@ -599,9 +596,9 @@ pdp_data_plot %>%
 
 ggsave(filename = "figures/supplementary/PDP_individual.png", height = 9, width = 8, dpi = 800)
 
-# 3. ASSESSMENT OF SPATIAL EXTRAPOLATION ----
+# 4. ASSESSMENT OF SPATIAL EXTRAPOLATION ----
 # This is done by looking at the coverage of sampled sites relative to the high-dimensional space of spatial predictors
-
+# This part of the script is an implementation of the python approach from here: https://doi.org/10.1101/2021.07.07.451145
 
 #First read data of all predictors globally for all COMIDS, And transform it as the observations df
 
@@ -701,8 +698,6 @@ assess_spatial_extrapolation <- function(df_sampled, df_global, month, plot_the_
   dat_out <- tibble(COMID = df_together$COMID,
                     obs = 0)
   
-  
-  
   #now we do a loop to run it for all combinations of PC axis, (600)
   for(i in 1:length(combinations$PC)){
     
@@ -770,8 +765,6 @@ oct_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_tran
 nov_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 11, plot_the_space = FALSE)
 dec_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 12, plot_the_space = FALSE)
 
-jan_extrap %>% 
-  summarise(sum(interp_Jan > .8)/n())
 
 extrap_monthly <- jan_extrap %>% 
   left_join(feb_extrap, by = "COMID") %>% 

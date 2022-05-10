@@ -1,13 +1,13 @@
-# Info ------
-# Author: Gerard Rocher-Ros
-# Last edit: 2022-04-25
-# Script to process files into GIS layers for further visualization. 
-# This script uses the modelled methane concentrations in scripts #3, and upscaled fluxes from scripts #4 to
-# produce GIS shapefiles for visualization. Data is aggregated with larger hexes to represent broad patterns.
-# 
+########################################.
+#### Script to process files into GIS layers for further visualization. 
+#### This script uses the modelled methane concentrations in scripts #3, and upscaled fluxes from scripts #4 to
+#### produce GIS shapefiles for visualization. Data is aggregated with larger hexes to represent broad patterns.
+#### Author:  Gerard Rocher-Ros
+#### Last edit: 2022-05-10
+########################################.
 
 
-# 0. Load  and install packages ----
+# Load  and install packages ----
 # List of all packages needed
 package_list <- c('tidyverse', 'sf',  'rnaturalearth')
 
@@ -21,7 +21,7 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 lapply(package_list, require, character.only = TRUE)
 
 
-# 1. Load files ----
+# Load files ----
 
 #upscaled methane fluxes
 meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) %>% 
@@ -66,7 +66,7 @@ gc()
 
 
 
-# 2. GIS processing of files ----
+# GIS processing of files ----
 
 #First we calculate average yearly values, takes some time 
 #also turn it into a sf object
@@ -204,7 +204,8 @@ extrap_hexes_avg %>% #extrap_pols %>%
   st_write( "data/processed/GIS/extrap_sites.shp", delete_layer = TRUE)
 
 
-## Aggregated maps of important variables ----
+# Aggregated maps of important variables ----
+# This is fully optional, I have used it for some presentations
 
 
 #read the global predictors df

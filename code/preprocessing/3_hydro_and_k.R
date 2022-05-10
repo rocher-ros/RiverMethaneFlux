@@ -1,6 +1,9 @@
-# Info ------
-# Author: Shaoda Liu but heavily modified by Gerard Rocher-Ros
-# Script upscale CH4 emissions in rivers globally.
+########################################.
+#### R script to estimate average monthly discharge and the gas transfer velocities for each river reach in GRADES
+#### This part is based on the article by Liu et al: https://doi.org/10.1073/pnas.2106322119
+#### Author: Gerard Rocher-Ros, from an original script by Shaoda Liu that I have heavily modified
+#### Last edit: 2022-05-10
+########################################.
 
 
 #Common variables, function, and datasets
@@ -9,7 +12,7 @@ Qquantiles <- c('Q0', 'Q10', 'Q20', 'Q30', 'Q40', 'Q50',
 
 # 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive' ,  'ncdf4', 'foreign')
+package_list <- c('tidyverse', 'ncdf4', 'foreign')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -218,11 +221,6 @@ df <- df %>%
   left_join(grades %>% select(COMID, subarea), by = "COMID") %>% 
   left_join(runoff_site, by = "COMID")
 
-names(df)
-
-ggplot(df)+
-  geom_density(aes(x=Aug_k_sd))+
-  scale_x_log10()
 
 #saving the results
 df %>% 

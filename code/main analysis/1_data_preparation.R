@@ -1,10 +1,8 @@
-########################################
+########################################.
 #### R script to extract all predictor variables from the GRADES dataset, prior the modelling in the next scripts
 #### Author: Gerard Rocher-Ros
 #### Last edit: 2022-04-22
-
-
-
+########################################.
 
 # Load  and install packages ----
 # List of all packages needed
@@ -21,17 +19,19 @@ lapply(package_list, require, character.only = TRUE)
 
 
 # Download required datasets form different sources:
-#1 GRIME
-#2 Grades with predictors
-#3 Ancillary datasets for upscaling (Q+k)
+#1 Global River Methane Database (GRiMeDB) from doi: xxxx 
+#2 GRADES river network with a wide array of predictors, and ancillary variables for upscaling from doi: xxxx
+#3 Optional: Output of this project to skip the processing and reproduce the figures, from doi: xxxx
 
 
 ## Load the GRiMeDB ----
 load(file.path("data", "MethDB_tables_converted.rda"))
 
+# fix NAs in channel type
 sites_df <- sites_df %>% 
   mutate(Channel_type = ifelse(is.na(Channel_type) == TRUE, "normal", Channel_type)) 
 
+#read the GRADES id (COMID) that belongs to each site in GRiMeDB
 grime_comids <- read_csv("data/processed/sites_meth_comid.csv") %>% 
   mutate(Site_Nid= as.character(Site_Nid))
 
@@ -169,7 +169,7 @@ grimeDB_attributes_mon <- grimeDB_attributes %>%
                                  month(date) == 10 ~ runoff_oct,
                                  month(date) == 11 ~ runoff_nov,
                                  month(date) == 12 ~ runoff_dec),
-          sresp_month = case_when(month(date) == 1 ~ sresp_jan*365,
+          sresp_month = case_when(month(date) == 1 ~ sresp_jan*365, #soil resp is in daily values
                                   month(date) == 2 ~ sresp_feb*365,
                                   month(date) == 3 ~ sresp_mar*365,
                                   month(date) == 4 ~ sresp_apr*365,
@@ -188,7 +188,7 @@ grimeDB_attributes_mon %>% filter(Site_Nid == "2597") %>%
   ggplot(aes(date, gw_month))+
   geom_point()
 
-#save to file and upload to google drive
+#save to file for further use in this project
 grimeDB_attributes_mon %>% 
   write_csv("data/processed/grimeDB_concs_with_grade_attributes.csv")  
 

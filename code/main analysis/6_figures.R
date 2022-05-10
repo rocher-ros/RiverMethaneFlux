@@ -1,9 +1,11 @@
-# Info ------
-# Author: Gerard Rocher-Ros
-# Script make some figures of CH4 emissions in rivers globally.
+########################################.
+#### Script to generate the main figures in the manuscript, some figures are generated in script #2 though
+#### Author:  Gerard Rocher-Ros
+#### Last edit: 2022-05-10
+########################################.
 
 
-# 0. Load  and install packages ----
+# Load  and install packages ----
 # List of all packages needed
 package_list <- c('tidyverse', 'googledrive' , 'sf',  'ggpubr', 'rnaturalearth', 'ggtext', 'lubridate', 'patchwork', 'see')
 
@@ -17,7 +19,7 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 lapply(package_list, require, character.only = TRUE)
 
 
-# 1. Load files ----
+# Load files ----
 # aggregated hex layers
 
 meth_hexes_avg <- st_read( "data/processed/GIS/meth_hexes.shp") %>%
@@ -30,7 +32,7 @@ extrap_pols <- st_read( "data/processed/GIS/extrap_sites.shp") %>%
   st_transform("+proj=eqearth +wktext") 
 
 meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) %>% 
-  select(-contains("sd"))
+  dplyr::select(-contains("sd"))
 
 grades <- read_csv("data/processed/grades_coords.csv") 
 
@@ -38,7 +40,7 @@ grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attribut
   filter(`Aggregated?` == "No",
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
   mutate( month=month(date)) %>%
-  select(COMID, Site_Nid, lat, lon, month) %>% 
+  dplyr::select(COMID, Site_Nid, lat, lon, month) %>% 
   group_by(COMID, month) %>% 
   summarise(lat= mean(lat),
             lon = mean(lon)) %>% 
@@ -60,10 +62,6 @@ world <-  ne_download(scale = 110, type = 'land', category = 'physical', returnc
 #and lake layer
 lakes <- ne_download(scale = 50, type = 'lakes', category = 'physical', returnclass = "sf")
 
-#and mountains
-mountains <- read_sf("data/raw/gis/global_mountains/CMEC_Mountains_Enh2018.shp") %>% 
-  st_transform(4326)
-
 
 #buffer df to shrink each hex according to runoff
 buffers <- meth_hexes_avg %>% 
@@ -84,8 +82,6 @@ buffers <- meth_hexes_avg %>%
   dplyr::select(buffer_change) %>% 
   mutate( buffer_change = ifelse(is.na(buffer_change) == TRUE, 0, buffer_change)) %>% 
   st_drop_geometry()
-
-
 
 #shrink the hexes by river area or runoff
 meth_hexes_avg2 <- meth_hexes_avg %>%
@@ -143,72 +139,7 @@ maps_combined <- map_ch4 / map_fch4 + plot_annotation(tag_levels = 'a')  & theme
 ggsave(maps_combined, filename = "figures/fig_maps.png", dpi= 1000, scale = 1.2)
 
 
-
-ggplot()+
-    geom_sf(
-      data = meth_hexes_avg2 %>% filter(runoff < 1), 
-      aes(fill =runoff), color = NA )+
-    scale_fill_viridis_c(
-      option = "magma", na.value = "gray", 
-      direction = -1)
-
-
-# maps of the extrapolated areas and CV of concentrations ----
-
-#extrapolated areas and sum by month
-#prepare the file 
-extrap_pols_avg <- extrap_pols %>% 
-  st_drop_geometry() %>% 
-  pivot_longer(-index, values_to = "extrap", names_to = "month") %>% 
-  mutate(month = str_remove(month, "interp_"),
-         extrap = ifelse(extrap < 0.92, 1, 0)) %>% 
-  group_by(index) %>% 
-  summarise(extrap_months = sum(extrap)) %>% 
-  arrange(index)
-
-#shrink according to runoff
-buffers <- buffers %>% arrange(index)
-
-extrap_pols_avg <- extrap_pols_avg %>%
-  left_join(extrap_pols %>% select(index), by = "index") %>% 
-  st_sf() %>% 
-  st_buffer( dist = buffers$buffer_change) 
-
-#get the sampled sites data
-sites_summary <- grimeDB_attributes %>% 
-  st_drop_geometry() %>% 
-  group_by(COMID) %>% 
-  summarise(n = n()) %>% 
-  left_join(grimeDB_attributes  %>% select(COMID), by = "COMID") %>% 
-  st_sf()
-  
-#do the map of which areas are extrapolated
-map_extrap <- 
-ggplot() +
-  geom_sf(
-    data = extrap_pols_avg, color = NA,
-    aes( fill = extrap_months) )+
-  geom_sf(data=lakes %>% filter(scalerank < 2), fill = "aliceblue", color = NA)+
-  geom_sf(data = sites_summary, aes(color = n ), size = 1, shape = 17)+
-  scale_fill_distiller(type = "seq", direction = 1, palette = "Oranges", na.value = "gray",
-                       name = "**Model extrapolation**<br>(number of months)")+
-  scale_color_viridis_c( option = "viridis", na.value = "gray", direction = -1,
-                        name = "**Measurements**<br> (number of months)" )+
-  guides( fill = guide_colourbar(title.position = "top"),
-          color = guide_colourbar(title.position = "top"))+
-  coord_sf(xlim = c(-15000000, 16000000), ylim = c(-7300000, 8600000), expand = FALSE) +
-  theme_void()+
-  theme(legend.position = c(.65, .1),
-        legend.direction = "horizontal",
-        legend.title = ggtext::element_markdown(size = 9),
-        legend.text = element_text(size=8),
-        legend.key.height  = unit(.3, 'cm'),
-        legend.key.width =  unit(.5, 'cm'),
-        legend.background = element_rect(fill=NA, color=NA),
-        legend.box = "horizontal"
-        )
-
-
+# Map of the CV of concentrations ----
 #map of CV of concentrations
 map_ch4_cv <- 
 ggplot() +
@@ -230,17 +161,16 @@ ggplot() +
         legend.key.height  = unit(.5, 'cm'),
         legend.key.width =  unit(.3, 'cm'))
 
-#put them together and save them
-maps_combined_model <-  map_extrap / map_ch4_cv + plot_annotation(tag_levels = 'a')  & theme(plot.tag.position = c(0.1, 1))
 
-ggsave(maps_combined_model, filename = "figures/fig_maps_uncertainity.png", dpi= 1500, scale = 1.2)
+ggsave(map_ch4_cv, filename = "figures/fig_maps_uncertainity.png", dpi= 1500, scale = 1.2)
 
 
-## Monthly maps ----
+# Monthly maps ----
+
 #Show the modelled concentrations by month, with ice cover
 labelled_months <- tibble(month= month.abb, labels =month.name)
 
-#prepare the files, pivlot to longer for faceting and fix the labels
+#prepare the files, pivot to longer for faceting and fix the labels
 meth_monthly <- meth_hexes_avg %>% 
   st_drop_geometry() %>% 
   dplyr::select(index, Jan_ch4:Dec_ch4) %>% 
@@ -250,7 +180,6 @@ meth_monthly <- meth_hexes_avg %>%
   mutate(labels = fct_relevel(labels, month.name)) %>% 
   left_join(meth_hexes_avg %>% select(index), by = "index") %>% 
   st_sf() 
-
 
 ice_monthly <- ice_cover %>% 
   select(-runoff) %>% 
@@ -264,7 +193,7 @@ ice_monthly <- ice_cover %>%
   drop_na(ice_frac) %>% 
   st_sf()
 
-#plot of monthly concentrations
+## plot of monthly concentrations ----
 map_monthly <- 
   ggplot( meth_monthly) +
   geom_sf(aes(fill = ch4), color = NA )+
@@ -291,7 +220,7 @@ ggsave(map_monthly,
 
 
 
-#### Map extrapolated areas monthly ----
+## Map of extrapolated areas monthly, with sampled sites ----
 #prepare the file, pivot longer for facet_wrap and fix month labels
 extrap_pols_monthly <- extrap_pols %>% 
   st_drop_geometry() %>% 
@@ -321,7 +250,7 @@ ggsave(map_extrap_areas,
 
 
 
-## Figure with seasonality emissions along latitudinal bands ----
+# Figure with seasonality emissions along latitudinal bands ----
 
 # Prepare file with latitudinal bands, and sum emissions for that 
 seasonal_df <- meth_gis %>% 
@@ -446,62 +375,7 @@ season_lat_plot +  inset_element(total_lats, left = .97, right = 1.4, bottom = -
 ggsave("figures/emissions_lat_season.png", width =8, height = 8, dpi = 800)
 
 
-seasonal_df_long %>% 
-  group_by(lat_label) %>% 
-  summarise(lat= mean(lat), 
-            total_flux= sum(ch4E)) %>% 
-  mutate(lat_label = fct_reorder(as_factor(lat_label), lat,  .desc = FALSE), 
-         total_flux_per = total_flux/sum(total_flux)*100) 
-  
-##### month /latitude plot of flux rate and surface area
-flux_lat_plot <- 
-  seasonal_df_long %>% 
-  ggplot(aes(month, ch4F))+
-  geom_col()+
-  scale_y_continuous(breaks = c(0, 0.03, 0.06))+
-  facet_wrap(~lat_label, ncol = 1, strip.position = "right")+
-  theme_bw()+
-  labs(x = "", y = "mmol m<sup>-3</sup> d<sup>-1</sup>", title="**CH<sub>4</sub> flux**" , fill="**River area** <br> (km^2 )")+
-  theme(axis.ticks.length.x = unit(0, "cm"),
-        strip.background = element_rect(color=NA, fill = "white"),
-        strip.text.y = element_text(size = 12, angle=0),
-        axis.text.x = element_text(size = 12, color = "gray5"),
-        axis.text.y = element_text(color = "gray40"),
-        panel.border =  element_rect(color="gray70"), 
-        panel.grid = element_blank(),
-        axis.line.y = element_line(color="gray70"),
-        axis.ticks.y = element_line(color="gray70"),
-        axis.title.y = ggtext::element_markdown(size = 10),
-        plot.title = ggtext::element_markdown(size = 14),
-        legend.title = ggtext::element_markdown(size = 12)
-  )
-
-area_lat_plot <- 
-  seasonal_df_long %>% 
-  ggplot(aes(month, areakm2))+
-  geom_col()+
-  scale_y_continuous(position = "right")+
-  facet_wrap(~lat_label, ncol = 1, strip.position = "right", scales="free_y")+
-  theme_bw()+
-  labs(x = "", y = expression(km^2), title = "**River surface area**")+
-  theme(axis.ticks.length.x = unit(0, "cm"),
-        strip.background = element_blank(),#element_rect(color=NA, fill = "gray80"),
-        strip.text.y = element_blank(), #element_text(size = 12, angle=0),
-        axis.text.x = element_text(size = 12, color = "gray5"),
-        axis.text.y = element_text(color = "gray40"),
-        panel.border =  element_rect(color="gray70"), 
-        panel.grid = element_blank(),
-        axis.line.y = element_line(color="gray70"),
-        axis.ticks.y = element_line(color="gray70"),
-        plot.title = ggtext::element_markdown(size = 14)
-  )
-
-flux_lat_plot +
-area_lat_plot
-
-ggsave("figures/supplementary/flux_area_month.png", width =10, height = 8, dpi = 800)
-
-# Flux comparison with grime data ----
+# Comparison of the modelled fluxes with measured fluxes in GRiMeDB data ----
 
 # Function to calculate gas saturation, 
 # from temperature ( in Kelvin) and atm pressure (derived from elevation (in m.a.s.l) for CH4 
@@ -529,14 +403,14 @@ hydro_k <- read_csv("data/processed/q_and_k.csv") %>%
 
 #do average fluxes
 meth_avg <- meth_gis %>% 
-  left_join(hydro_k %>% select(COMID, Slope, k_mean), by = "COMID") %>% 
+  left_join(hydro_k %>%  dplyr::select(COMID, Slope, k_mean), by = "COMID") %>% 
   drop_na(Jan_ch4F) %>% 
   rowwise() %>% 
-  mutate(Fch4_mean = mean(Jan_ch4F:Dec_ch4F, na.rm= TRUE)) %>% 
-  select(COMID, Slope, k_mean, Fch4_mean )
+  mutate(Fch4_mean = mean(Jan_ch4F:Dec_ch4F, na.rm = TRUE)) %>% 
+  dplyr::select(COMID, Slope, k_mean, Fch4_mean )
 
 
-## Now get GRiMeDB ----
+## Now get GRiMeDB 
 load(file.path("data", "MethDB_tables_converted.rda"))
 
 sites_df <- sites_df %>% 
@@ -608,7 +482,7 @@ mean(flux_comid$Diffusive_CH4_Flux_Mean/1000*12, na.rm=TRUE)
 
 #now join the observed fluxes and predicted into one df. I will filter the sites that are not well snapped (>100m)
 flux_comp <- flux_comid %>% 
-  select(COMID, Site_Nid, date= Date_start, distance_snapped, CH4mean, WaterTemp_best, elev=elevation_m_new, CO2mean,
+  dplyr::select(COMID, Site_Nid, date= Date_start, distance_snapped, CH4mean, WaterTemp_best, elev=elevation_m_new, CO2mean,
          Diffusive_CH4_Flux_Mean, Diff_Method, k_method ) %>% 
   filter(distance_snapped < 500) %>% 
   left_join( meth_gis, by="COMID") %>%  
@@ -710,23 +584,60 @@ plot_overall +
 
 ggsave("figures/supplementary/flux_comp_similark.png", width = 9, height = 4)
 
-flux_comp %>% 
-  filter(k600_pred > .01, k600_obs > .01) %>% 
-  rename(modelled_flux = flux_pred, measured_flux = flux_obs) %>% 
-  pivot_longer(c(modelled_flux, measured_flux), values_to = "ch4_flux", names_to = "method") %>% 
-  ggplot(aes(x=method, y=ch4_flux))+
-  geom_boxplot(fill="blue3", alpha=.5)+
+
+# Ebullition assessment ----
+
+mycolors2 <- colorRampPalette(RColorBrewer::brewer.pal(8, "Paired"))(93)
+#ecomparison of ebullition and difussive fluxes in GRIMeDB, we remove observations close to 0, virtually 0
+reg_compl_plot <- 
+  flux_comid %>% 
+  filter(Eb_CH4_Flux_Mean > 0.00001,
+         Diffusive_CH4_Flux_Mean > 0.0001) %>% 
+  filter(k_method %in% c("chamber + conc", "tracer addition")) %>% 
+  ggplot(aes(Diffusive_CH4_Flux_Mean, Eb_CH4_Flux_Mean ))+
+  geom_point( aes( color=Site_Nid), size = 3, alpha=.7)+
+  geom_smooth( method="lm",  color="black", size=1)+
+  geom_abline(intercept = 0, slope = 1, linetype=2)+
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), label.y.npc = .99)+
+  stat_regline_equation(label.y.npc = .9)+
+  scale_color_manual(values = mycolors2)+
   scale_y_log10(labels=scales::number)+
-  labs(x="", y="CH<sub>4</sub> flux (mmol m^-2 d^-1)")+
-  theme_bw()+
-  theme(axis.title.y = ggtext::element_markdown())
+  scale_x_log10(labels=scales::number)+
+  labs(x = "Diffusive CH<sub>4</sub> flux <br>(mmol m^-2 d<sup>-1</sup>)", 
+       y = "Ebulitive CH<sub>4</sub> flux <br>(mmol m^-2 d<sup>-1</sup>)")+
+  theme_classic()+
+  theme(legend.position = "none",
+        axis.title.y = ggtext::element_markdown(),
+        axis.title.x = ggtext::element_markdown())
 
-#ggsave("figures/flux_comp_boxplot.png")
 
+#ebullition and difussion density plots
+density_comp_plot <- 
+  flux_comid %>% 
+  filter(Eb_CH4_Flux_Mean > 0.0001,
+         Diffusive_CH4_Flux_Mean > 0.0001) %>% 
+  filter(k_method %in% c("chamber + conc", "tracer addition")) %>% 
+  pivot_longer(c(Eb_CH4_Flux_Mean, Diffusive_CH4_Flux_Mean ), names_to = "type", values_to = "flux") %>% 
+  mutate(type= case_when(type == "Eb_CH4_Flux_Mean" ~ "Ebullition",
+                         type == "Diffusive_CH4_Flux_Mean" ~ "Diffusion" )) %>% 
+  ggplot(aes(type, flux, fill=type))+
+  geom_violindot(fill_dots = "gray30", color_dots="gray30", dots_size = 1, width = 1.5, alpha = .7) +
+  stat_summary(fun = "median", geom = "point",  size=4, colour = "black", 
+               position = position_nudge(x = 0.1, y = 0), show.legend = FALSE)+
+  scale_y_log10(labels=scales::number)+
+  scale_fill_manual(values= c("darkblue", "cornflowerblue"))+
+  labs(x = "", y = "CH<sub>4</sub> flux<br> (mmol m^-2 d<sup>-1</sup>)")+
+  theme_classic()+
+  theme(legend.position = "none",
+        axis.title.y = ggtext::element_markdown(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(size=11, color="black"))
 
-#temperature dependence plots
+# Temperature dependence of diffusive fluxes ----
+
 mycolors <- colorRampPalette(RColorBrewer::brewer.pal(8, "Set1"))(13)
 
+#plot with all sites with a n > 30
 plot_sites <- flux_sites %>% 
   filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
   ggplot(aes(temp_stand, Diffusive_CH4_Flux_Mean))+
@@ -752,31 +663,7 @@ plot_sites <- flux_sites %>%
   theme_classic()+
   theme(axis.title.y = ggtext::element_markdown(), legend.position = "none")
 
-
-flux_sites %>% 
-  filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
-  drop_na(System_size) %>% 
-  mutate(System_size = fct_relevel(System_size, "large", after = Inf)) %>% 
-  ggplot(aes(temp_stand, Diffusive_CH4_Flux_Mean))+
-  geom_point(aes( color=abs(Latitude)),  size = 2, alpha = .6)+
-  geom_smooth(method= "lm", color="gray20", se= FALSE, size = 1)+
-  #stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), label.y.npc = .99)+
-  stat_regline_equation(label.y.npc = .99)+
-  scale_color_viridis_c(name="Latitude", limits= c(0, 71))+
-  #geom_abline(slope = .96, intercept = -.39, linetype = 2)+
-  #annotate("text", x = 2.7, y = 90, label="m = 0.96", angle = 48)+
-  #annotate("text", x = -2, y = 250, label="n = 4,417")+
-  scale_x_continuous(name= expression(paste("Standardized temperature ", bgroup("(", frac(1, kT) - frac(1, kT[C]), ")" ))), limits= c(-2.6, 3.1),
-                     sec.axis = sec_axis(~ (273.15*boltzmann_k* . + 0.0520562)/(0.00347041 - boltzmann_k* . ), name =expression("Temperature " ( degree*C)), 
-                                         breaks = seq(0, 40, by=5)) )+ # solved using wolfram alpha, y= 1/(k*(288.15)) - 1/(k*(x+273.15)), solve x 
-  scale_y_continuous(trans= "log10", labels = scales::number, breaks = c(.01, .1, 1, 10, 100),
-                     name= "Diffusive CH<sub>4</sub> flux <br> (mmol m^-2 d<sup>-1</sup>)")+
-  theme_classic()+
-  theme(axis.title.y = ggtext::element_markdown(), legend.position = "right")+
-  facet_wrap(~System_size)
-
-ggsave("figures/supplementary/river_size_temp.png", width = 12, scale = .7)
-
+# plot with all data
 diff_plot <- 
   flux_sites %>% 
   filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
@@ -798,6 +685,40 @@ diff_plot <-
   theme(axis.title.y = ggtext::element_markdown(), legend.position = "right")
 
 
+diff_plot + 
+  plot_sites +
+  density_comp_plot + 
+  reg_compl_plot + 
+  plot_layout(ncol = 2) +
+  plot_annotation(tag_levels = 'a') & 
+  theme(plot.tag.position = c(0.1, 1), plot.tag = element_text(size=15))
+
+ggsave("figures/diff_temperature_ebullition.png", width = 10, height = 7)
+
+
+## Temperature dependence of ebullition and across river size ----
+flux_sites %>% 
+  filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
+  drop_na(System_size) %>% 
+  mutate(System_size = fct_relevel(System_size, "large", after = Inf)) %>% 
+  ggplot(aes(temp_stand, Diffusive_CH4_Flux_Mean))+
+  geom_point(aes( color=abs(Latitude)),  size = 2, alpha = .6)+
+  geom_smooth(method= "lm", color="gray20", se= FALSE, size = 1)+
+  stat_regline_equation(label.y.npc = .99)+
+  scale_color_viridis_c(name="Latitude", limits= c(0, 71))+
+  #geom_abline(slope = .96, intercept = -.39, linetype = 2)+
+  #annotate("text", x = 2.7, y = 90, label="m = 0.96", angle = 48)+
+  #annotate("text", x = -2, y = 250, label="n = 4,417")+
+  scale_x_continuous(name= expression(paste("Standardized temperature ", bgroup("(", frac(1, kT) - frac(1, kT[C]), ")" ))), limits= c(-2.6, 3.1),
+                     sec.axis = sec_axis(~ (273.15*boltzmann_k* . + 0.0520562)/(0.00347041 - boltzmann_k* . ), name =expression("Temperature " ( degree*C)), 
+                                         breaks = seq(0, 40, by=5)) )+ # solved using wolfram alpha, y= 1/(k*(288.15)) - 1/(k*(x+273.15)), solve x 
+  scale_y_continuous(trans= "log10", labels = scales::number, breaks = c(.01, .1, 1, 10, 100),
+                     name= "Diffusive CH<sub>4</sub> flux <br> (mmol m^-2 d<sup>-1</sup>)")+
+  theme_classic()+
+  theme(axis.title.y = ggtext::element_markdown(), legend.position = "right")+
+  facet_wrap(~System_size)
+
+ggsave("figures/supplementary/river_size_temp.png", width = 12, scale = .7)
 
 flux_sites %>% 
   filter(Eb_CH4_Flux_Mean > 0.001) %>% 
@@ -820,208 +741,6 @@ flux_sites %>%
 
 ggsave("figures/supplementary/ebullition_temp.png", scale = .7)
 
-flux_comid %>% 
-  filter(Eb_CH4_Flux_Mean > 0.00001,
-         Diffusive_CH4_Flux_Mean > 0.0001) %>%
-  filter(k_method == "chamber + conc") %>% 
-  select(Site_Nid) %>% unique()
-
-flux_comid %>% 
-  filter(Eb_CH4_Flux_Mean > 0.00001) %>% 
-  count(Site_Nid)
-
-mycolors2 <- colorRampPalette(RColorBrewer::brewer.pal(8, "Paired"))(93)
-
-#ebullition
-reg_compl_plot <- 
-  flux_comid %>% 
-  filter(Eb_CH4_Flux_Mean > 0.00001,
-         Diffusive_CH4_Flux_Mean > 0.0001) %>% 
-  filter(k_method %in% c("chamber + conc", "tracer addition")) %>% 
-  ggplot(aes(Diffusive_CH4_Flux_Mean, Eb_CH4_Flux_Mean ))+
-  geom_point( aes( color=Site_Nid), size = 3, alpha=.7)+
-  geom_smooth( method="lm",  color="black", size=1)+
-  geom_abline(intercept = 0, slope = 1, linetype=2)+
-  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), label.y.npc = .99)+
-  stat_regline_equation(label.y.npc = .9)+
-  scale_color_manual(values = mycolors2)+
-  scale_y_log10(labels=scales::number)+
-  scale_x_log10(labels=scales::number)+
-  labs(x = "Diffusive CH<sub>4</sub> flux <br>(mmol m^-2 d<sup>-1</sup>)", 
-       y = "Ebulitive CH<sub>4</sub> flux <br>(mmol m^-2 d<sup>-1</sup>)")+
-  theme_classic()+
-  theme(legend.position = "none",
-        axis.title.y = ggtext::element_markdown(),
-        axis.title.x = ggtext::element_markdown())
-
-
-#ebullition
-density_comp_plot <- 
-  flux_comid %>% 
-  filter(Eb_CH4_Flux_Mean > 0.0001,
-         Diffusive_CH4_Flux_Mean > 0.0001) %>% 
-  filter(k_method %in% c("chamber + conc", "tracer addition")) %>% 
-  pivot_longer(c(Eb_CH4_Flux_Mean, Diffusive_CH4_Flux_Mean ), names_to = "type", values_to = "flux") %>% 
-  mutate(type= case_when(type == "Eb_CH4_Flux_Mean" ~ "Ebullition",
-                         type == "Diffusive_CH4_Flux_Mean" ~ "Diffusion" )) %>% 
-  ggplot(aes(type, flux, fill=type))+
-  geom_violindot(fill_dots = "gray30", color_dots="gray30", dots_size = 1, width = 1.5, alpha = .7) +
-  stat_summary(fun = "median", geom = "point",  size=4, colour = "black", 
-               position = position_nudge(x = 0.1, y = 0), show.legend = FALSE)+
-  scale_y_log10(labels=scales::number)+
-  scale_fill_manual(values= c("darkblue", "cornflowerblue"))+
-   labs(x = "", y = "CH<sub>4</sub> flux<br> (mmol m^-2 d<sup>-1</sup>)")+
-  theme_classic()+
-  theme(legend.position = "none",
-        axis.title.y = ggtext::element_markdown(),
-        axis.ticks.x = element_blank(),
-        axis.text.x = element_text(size=11, color="black"))
-
-
-diff_plot + 
-  plot_sites +
-  density_comp_plot + 
-  reg_compl_plot + 
-  plot_layout(ncol = 2) +
-  plot_annotation(tag_levels = 'a') & 
-  theme(plot.tag.position = c(0.1, 1), plot.tag = element_text(size=15))
-
-ggsave("figures/diff_temperature_ebullition.png", width = 10, height = 7)
-
-
-
-flux_comid %>% 
-  filter(Eb_CH4_Flux_Mean > 0.0001,
-         Diffusive_CH4_Flux_Mean > 0.0001) %>% 
-  filter(k_method == "chamber + conc") %>% 
-  summarise(eb_median = median(Eb_CH4_Flux_Mean),
-            diff_median = median(Diffusive_CH4_Flux_Mean),
-            eb_min = min(Eb_CH4_Flux_Mean),
-            eb_max = max(Eb_CH4_Flux_Mean))
-
-
-residuals_ebb <- flux_comid %>% 
-  filter(Eb_CH4_Flux_Mean > 0.0001,
-         Diffusive_CH4_Flux_Mean > 0.0001, 
-         k_method == "chamber + conc") %>% 
-  mutate(diff_log = log(Diffusive_CH4_Flux_Mean), 
-         ebb_log = log(Eb_CH4_Flux_Mean)) %>% 
-  do(augment(lm(ebb_log ~ diff_log, data=.)))
-
-residuals_ebb %>% 
-  select(.resid) %>% 
-  mutate(residuals = exp(.resid)) %>% 
-  summarise(sd = sd(residuals),
-            mean =mean(residuals))
-
-ggplot(residuals_ebb)+
-  geom_histogram(aes(.resid), bins=60)+
-  theme_classic()
-  
-sites_with_many_obs <- conc_df_comids %>% 
-  filter(CH4mean > 0.0005) %>% 
-  group_by(COMID = as.factor(COMID)) %>% 
-  mutate(n_obs = n(), 
-         month= month.abb[month(date)]) %>% 
-  filter(n_obs > 150) %>% 
-  arrange(n_obs) %>% 
-  ungroup() %>% 
-  mutate(month = fct_relevel(month, month.abb),
-         COMID = fct_reorder(COMID, desc(n_obs))) 
-
-  labs_plot_n_obs <- sites_with_many_obs %>% 
-  group_by(COMID) %>% 
-  slice_max( Publication_Nid) %>% 
-  left_join(papers_df, by = "Publication_Nid" ) %>%  
-  group_by(COMID) %>% 
-  summarise( Publication_Nid= first(Publication_Nid), 
-             n_obs= first(n_obs), Authorlastname = first(Authorlastname)) %>% 
-  mutate(label = paste0(COMID," \n(", Authorlastname, ")")) %>% 
-  arrange(desc(n_obs))
-
-ggplot(sites_with_many_obs, aes(COMID, CH4mean, color= month ))+
-  geom_jitter(alpha = .3)+
-  geom_text(data=labs_plot_n_obs, aes(COMID, 0.0001, label = n_obs), color = "black")+
-  stat_summary_bin(aes(group= month, fill=month ), fun.data = "mean_sd", color= "black", size = 1, shape =21)+
-  scale_y_log10(labels=scales::number, breaks = c(0.001, 0.01, 0.1, 1, 10, 100))+
-  scale_color_viridis_d(name = "")+
-  scale_fill_viridis_d(name = "")+
-  scale_x_discrete(labels = labs_plot_n_obs$label, guide = guide_axis(angle = 45))+
-  labs(x = "**GRADES river reach ID** <br> (main author)", y = "**CH<sub>4</sub> concentration** <br> (mmol m^-3)")+
-  theme_classic()+
-  theme(legend.position = "top", axis.title.y = ggtext::element_markdown(),
-        axis.title.x = ggtext::element_markdown())+
-  guides(color=guide_legend(nrow=1))
- 
-ggsave("figures/supplementary/sites_with_many_obs.png", width = 10, height = 5)
-
-
-time_series <- sites_with_many_obs %>% 
-  filter(COMID == 24006204, Publication_Nid == 2320) %>% 
-  ggplot(aes(month, CH4mean, color=Site_Nid, group = Site_Nid))+
-  geom_point(alpha=.6)+
-  geom_smooth( se= FALSE)+
-  geom_point(data = . %>% group_by(Site_Nid, month) %>% summarise(CH4mean = mean(CH4mean)),
-             aes(month, CH4mean, color=Site_Nid), size=5)+
-  scale_color_brewer(palette = "Set2", guide = "none" )+
-  scale_y_log10(labels=scales::number, breaks = c( 0.01, 0.1, 1, 10, 100), limits= c(0.01, 100))+
-  theme_classic()+
-  labs(x="", y= expression(CH[4]~concentration~(mmol~m^-3)), title= "Temporal variability")
-
-spatial_surveys <- sites_with_many_obs %>% 
-  filter(COMID == 24006204, Publication_Nid == 2279) %>% 
-  mutate(Site_Nid = as.numeric(Site_Nid)) %>% 
-  ggplot(aes(COMID, CH4mean, color=Site_Nid))+
-  geom_jitter(alpha = .8, size = 3)+
-  scale_color_distiller(type = "seq", palette = "Reds",  guide = "none" )+
-  scale_y_log10(labels=scales::number, breaks = c( 0.01, 0.1, 1, 10, 100), limits= c(0.01, 100))+
-  theme_classic()+
-  labs(x = "", y = "", title= "Spatial variability")+
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_blank())
-
-time_series + spatial_surveys +  plot_layout(widths = c(2.5, 1) )
-
-ggsave("figures/supplementary/krycklan_example.png",  width = 7, height = 5)
-
-    
-## Maps of important features ----
-important_pols <- st_read( "data/processed/GIS/important_features.shp") %>% 
-  st_transform("+proj=eqearth +wktext") %>% 
-  mutate(prec_yr = log(prec_yr))
-
-
-ggplot(important_pols, aes(fill=slope))+
-  geom_sf(color= NA)+
-  scale_fill_viridis_c()
-
-#devtools::install_github("marcosci/layer")
-library(layer)
-
-tilt_landscape_1 <- tilt_map(important_pols)
-tilt_landscape_2 <- tilt_map(important_pols,  y_shift = -15000000)
-tilt_landscape_3 <- tilt_map(important_pols,  y_shift = -15000000*2)
-tilt_landscape_4 <- tilt_map(important_pols,  y_shift = -15000000*3)
-tilt_landscape_5 <- tilt_map(important_pols,  y_shift = -15000000*4)
-tilt_landscape_6 <- tilt_map(important_pols,  y_shift = -15000000*5)
-
-
-map_list <- list(tilt_landscape_1, tilt_landscape_2, tilt_landscape_3, tilt_landscape_4, tilt_landscape_5,
-                 tilt_landscape_6 )
-
-plots_tiled1 <- plot_tiltedmaps(map_list, 
-                                layer = c("slope", "elev", "pyearRS", "Lg_gw_m", "Lg_T_OC", "temp_yr" ),
-                                palette = c("turku", "batlowW", "lajolla","tofino", "bilbao",  "rocket"),
-                                direction = c(-1, 1, 1, 1, 1, -1))
-
-plots_tiled2 <- plot_tiltedmaps(map_list, 
-                                layer = c("Lg_k_mn", "ptlnd_c", "GPP_yr", "prec_yr", "Lg_ppdn", "S_SILT"),
-                                palette = c("grayC", "inferno" ,"bam", "roma", "tokyo", "cividis"),
-                                direction = c(1, 1, 1, 1, 1, 1))
-
-plots_combined <- plots_tiled1 + plots_tiled2
-
-ggsave( "figures/supplementary/tiled_maps.png", plots_combined, dpi = 1000, scale = 4)
 
 
 

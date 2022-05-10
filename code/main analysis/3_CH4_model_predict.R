@@ -1,12 +1,13 @@
-# Info ------
-# Author: Gerard Rocher-Ros
-# Script to model CH4 concentrations in rivers globally.
-# Part 1 is to clean and transform data needed for the model
+########################################.
+#### R script to model CH4 concentrations in rivers and upscale globally.
+#### Author: Gerard Rocher-Ros
+#### Last edit: 2022-04-22
+########################################.
 
 
-# 0. Load  and install packages ----
+# Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'tidymodels', 'googledrive' , 'lubridate')
+package_list <- c('tidyverse', 'tidymodels', 'lubridate')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -17,21 +18,15 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 # Now load all the packages
 lapply(package_list, require, character.only = TRUE)
 
-
-
 ## Read files ----
-## Download the GRiMeDB with GRADES 
+## Check if the file is downloaded 
 if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE) {
   print("files already downloaded")
 } else {
-  drive_download(
-    "SCIENCE/PROJECTS/RiverMethaneFlux/processed/grimeDB_concs_with_grade_attributes.csv",
-    path = "data/processed/grimeDB_concs_with_grade_attributes.csv",
-    overwrite = TRUE
-  )
+  print("go to script 1_data_preparation.R and run to produce the needed file for this script")
 }
 
-# 1. Data filtering ----
+# Data filtering ----
 # First clean the methDB for the useful sites 
 # Steps done:
 # 1. remove aggregated sites
@@ -51,15 +46,12 @@ colnames(grimeDB_attributes)
 if(file.exists("data/processed/grade_attributes.csv") == TRUE) {
   print("files already downloaded")
 } else {
-drive_download( file="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attributes.csv",
-                path="data/processed/grade_attributes.csv",
-                overwrite = TRUE)
+  print("error, file not found. go to repository and download the data")
 }
+
 
 #read the lobal predictors df
 global_preds <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE) 
-
-
 
 # we will log transform those to start with
 vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
@@ -112,11 +104,8 @@ gc()
 
 
 
-# 2.  Run the RF models models ----
-#with the tuned parameters obtained with thw whole dataset
-# ref: https://stackoverflow.com/questions/62687664/map-tidymodels-process-to-a-list-group-by-or-nest
-
-#setup of the RF model
+#Setup the RF models ----
+#with the tuned parameters obtained  in the previous script
 
 n.cores = parallel::detectCores()-1
 
@@ -134,7 +123,7 @@ wf <-
   add_model(rf_mod)
 
 
-# 3. Function to predict values to the whole world ----
+#Function to predict values to the whole world
 predict_methane <- function(data_model, month, global_predictors, m_res) {
   
   #select adjacent months for each month
@@ -147,15 +136,10 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
     filter(month %in% all_of(months_selected)) %>% 
     dplyr::select(-month)
   
-  #split <- initial_split(df) 
-  #train_df <- training(split)
-  #test_df <- testing(split)
-  
   preds_all <- tibble( COMID = global_predictors$COMID)
   
   for (i in 1:m_res ){
     print(i)
-  #train_sub <- slice_sample(train_df, prop = .8) 
   
   split <- initial_split(df, prop = .7, strata = biome_label) 
   
@@ -170,7 +154,6 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
   fit_wf <- wf %>%
     add_recipe(recipe_train) %>%
     fit(data = train_sub) 
-  
 
   all_months <- tolower(month.abb)
   
@@ -180,10 +163,8 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
     select(-ends_with(setdiff(all_months, month_selected))) %>%
     rename_all(~ str_replace(., month_selected, "month"))
   
-  
   preds <- predict(fit_wf, df_predictors)
 
-  
   preds_all <- preds_all %>% 
     add_column( !! paste0("rep_", i) := preds$.pred)
 
@@ -198,8 +179,6 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
               sd = sd(values, na.rm = TRUE))  %>% 
     rename_at(vars(mean, sd),  ~ paste0(month.abb[month], "_" , . ) ) 
   
-  
-  
   data_out %>% 
   write_csv(paste0("data/processed/meth_preds/ch4_preds_uncertainty_", month.abb[month], ".csv" ))
   
@@ -208,6 +187,7 @@ predict_methane <- function(data_model, month, global_predictors, m_res) {
 }
 
 
+# Upscale methane globally by month, with uncertainity ----
 n_boot = 100
 
 #prepare a dataset, nesting by month
@@ -237,4 +217,5 @@ ch4_oct <- predict_methane(data_model_monthly, 10, global_preds_trans, n_boot)
 ch4_nov <- predict_methane(data_model_monthly, 11, global_preds_trans, n_boot)
 ch4_dec <- predict_methane(data_model_monthly, 12, global_preds_trans, n_boot)
 
+#the function already exports the monthly file so nothing else to do here
 

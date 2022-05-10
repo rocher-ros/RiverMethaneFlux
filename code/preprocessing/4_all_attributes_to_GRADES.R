@@ -1,6 +1,13 @@
+########################################.
+#### R script to attach put all those predictors into one file for use in the modelling  
+#### Author: Gerard Rocher-Ros
+#### Last edit: 2022-05-10
+########################################.
+
+
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive', 'lubridate', 'sf')
+package_list <- c('tidyverse', 'lubridate', 'sf')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -11,31 +18,7 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 # Now load all the packages
 lapply(package_list, require, character.only = TRUE)
 
-# Download needed files ----
-# download the grade attributes to the local copy 
-dir.create("data/raw/gis/GRADES_attributes") 
-grades_in_drive <- drive_ls("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes")
 
-#get the file paths for drive and locally
-names_in_drive <- paste("SCIENCE/PROJECTS/RiverMethaneFlux/gis/GRADES flowline attributes", grades_in_drive$name, sep="/") 
-names_destination <- paste("data/raw/gis/GRADES_attributes", grades_in_drive$name, sep="/") 
-
-#feed them through a map, if needed
-if(all(file.exists(names_destination)) == TRUE) {
-  print("files already downloaded")
-} else {
-  map2(names_in_drive, names_destination, drive_download)
-}
-
-## Download the sites in GRiMe with the COMID's ----
-if(file.exists("data/processed/sites_meth_comid.csv") == TRUE) {
-  print("files already downloaded")
-} else {
-  drive_download("SCIENCE/PROJECTS/RiverMethaneFlux/methane/sites_meth_comid.csv",
-                 path = "data/processed/sites_meth_comid.csv" )
-}
-
-rm(list=ls())
 
 # Read files into R ----
 #get the names
@@ -246,8 +229,5 @@ grades_attributes %>%
 write_csv("data/processed/grade_attributes.csv") 
 
 
-drive_upload(media = "data/processed/grade_attributes.csv",
-             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/grade_attributes.csv",
-             overwrite = TRUE)
 
 
