@@ -209,7 +209,14 @@ print(k %>%
 
 }
 
-df <- df %>% left_join(grades %>% select(COMID, subarea))
+#read runoff file
+runoff_site <- read_csv("data/raw/gis/GRADES_attributes/runoff.csv", lazy = FALSE) %>% 
+  dplyr::select(COMID, runoff_yr)
+
+
+df <- df %>% 
+  left_join(grades %>% select(COMID, subarea), by = "COMID") %>% 
+  left_join(runoff_site, by = "COMID")
 
 names(df)
 
@@ -222,7 +229,3 @@ df %>%
   select(-ends_with("Ta")) %>% 
   write_csv('data/processed/q_and_k.csv')
 
-#upload to drive
-drive_upload(media = "data/processed/q_and_k.csv",
-             path="SCIENCE/PROJECTS/RiverMethaneFlux/processed/q_and_k.csv",
-             overwrite = TRUE)

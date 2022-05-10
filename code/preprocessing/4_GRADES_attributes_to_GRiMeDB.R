@@ -79,8 +79,8 @@ gwTable %>%
   summarise(across(everything(), ~sum(is.na(.x))))
 
 q_k <- read_csv("data/processed/q_and_k.csv") %>% 
-  dplyr::select(COMID, ends_with("Qmean"), ends_with("k"), -yeaQmean) #lapply(list.files(path = "data/raw/gis/GRADES_attributes", pattern = "k", full.names = TRUE), read_csv) %>% 
-  #bind_rows()
+  dplyr::select(COMID, ends_with("Qmean"), ends_with("k"), -c(yeaQmean, runoff_yr))
+
 
 colnames(q_k) <- c("COMID", "q_jan", "q_feb", "q_mar", "q_apr", "q_may", "q_jun", "q_jul", "q_aug", "q_sep", "q_oct", "q_nov", "q_dec",
                  "k_jan", "k_feb", "k_mar", "k_apr", "k_may", "k_jun", "k_jul", "k_aug", "k_sep", "k_oct", "k_nov", "k_dec")
@@ -157,15 +157,14 @@ colnames(peatlands)
 biomes <- read_csv("data/raw/gis/GRADES_attributes/biomes.csv") %>% dplyr::select(-biome_num)
 colnames(biomes)
 
+runoff <- read_csv("data/raw/gis/GRADES_attributes/runoff.csv") 
+colnames(runoff)
+
 
 #read coordinates from grades
 grades_latlon <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
   dplyr::select(COMID, lat =lat_mid, lon=lon_mid, slope)
 
-nutrients_water %>% 
-  summarise(across(everything(), ~sum(is.na(.x)))) %>% 
-  pivot_longer(everything(), names_to = "name", values_to = "n_na") %>% 
-  arrange(desc(n_na))
 
 # Gw has some gaps, fix it
 grades_gw_sf <- grades_latlon %>% 
@@ -216,6 +215,7 @@ grades_attributes <-  annPP %>%
   left_join(mountains, by ="COMID") %>% 
   left_join(peatlands, by ="COMID") %>% 
   left_join(biomes, by ="COMID") %>% 
+  left_join(runoff, by ="COMID") %>% 
   drop_na(q_jan) %>% 
   distinct(COMID, .keep_all = TRUE)
 
@@ -230,10 +230,6 @@ grades_attributes %>%
   filter(duplicated(.[["COMID"]])) %>% 
   arrange(COMID)  %>% print(n=100)
 
-grades_attributes %>% 
-  filter(is.na(biome_label )) %>% 
-  dplyr::select(COMID, lat, lon, biome_label ) %>% 
-  print(n=10)
 
          
 rm(annPP, eleSlope, gwTable, q_k, land, monPP, monTemp, popdens, prectemp, soilATT, sresp, 
