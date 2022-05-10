@@ -118,15 +118,15 @@ gc()
 
 #setup of the RF model
 
-n.cores= parallel::detectCores()-1
+n.cores = parallel::detectCores()-1
 
 rf_mod <-
   rand_forest(
-    mtry = 10,
-    trees = 1200,
-    min_n = 21 ) %>%
+    mtry = 8,
+    trees = 1000,
+    min_n = 6 ) %>%
   set_mode("regression") %>%
-  set_engine("ranger", num.threads =n.cores)
+  set_engine("ranger", num.threads = n.cores)
 
 #prepare a workflow with it to feed into the function
 wf <-

@@ -139,7 +139,7 @@ ggsave(filename= "figures/supplementary/correlations.png", plot=plot_correlation
 
 
 ##2.1 parameter tuning  for the RF, takes several hours so welcome to skip it ----
-## First run will be with the model with average values by site, to see the broad performance and tune RF parameters
+## First run will be with the model with average values by COMID, to see the broad performance and tune RF parameters
  #remove variables that are highly correlated
  data_for_model <-  grimeDB_attr_trans %>%
   select(-biome_label) %>% 
@@ -152,9 +152,7 @@ ggsave(filename= "figures/supplementary/correlations.png", plot=plot_correlation
 #prep the dataset into a training and testing one
 grime_split <- initial_split(data_for_model) 
 
-
-
-#Model recipe, predict CH4, center and scale all predictors
+#Model recipe, predict CH4
 grime_recipe <-  training(grime_split) %>%
   recipe(Log_CH4mean ~.) 
 
@@ -190,7 +188,7 @@ set.seed(345)
 tune_res <- tune_grid(
   tune_wf,
   resamples = trees_folds,
-  grid = 5
+  grid = 20
 )
 
 tune_res
@@ -209,13 +207,15 @@ tune_res %>%
   labs(x = NULL, y = "rsq")
 
 rm(tune_res)
+
 #Do a more targeted tuning with a new grid
 rf_grid <- grid_regular(
   mtry(range = c(10,20)),
   min_n(range = c(15, 30)),
-  levels = 10
+  levels = 20
 )
 
+#tune the grid again
 set.seed(456)
 regular_res <- tune_grid(
   tune_wf,
@@ -223,34 +223,24 @@ regular_res <- tune_grid(
   grid = rf_grid
 )
 
+# Let's check the results
+regular_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rsq") %>%
+  select(mean, min_n, mtry) %>%
+  ggplot(aes(mean, min_n, color = mtry)) +
+  geom_point() +
+  geom_line(aes(group = mtry))+
+  scale_color_viridis_c()+
+  theme_bw()
 
 #select the best one and finish the model 
 best_auc <- select_best(regular_res, "rmse")
 
-final_rf <- finalize_model(
-  tune_spec,
-  best_auc
-)
-
-final_rf %>%
-  set_engine("ranger", importance = "permutation") %>%
-  fit(Log_CH4mean ~ .,
-      data = juice(grime_prep)
-  ) %>%
-  vip(geom = "point")
-
-
-final_wf <- workflow() %>%
-  add_recipe(grime_recipe) %>%
-  add_model(final_rf)
-
-#get the model from the last fit
-final_res <- final_wf %>%
-  last_fit(grime_split)
-
-#perf. metrics
-final_res %>%
-  collect_metrics()
+# Best model has mtry = 8, trees = 1000, min_n = 6.
+#This workflow tuned only mtry and min_n, to do the trees you should re-run it changing the trees for min_n for example. 
+# I tried changing it both for min_n and mtry to double check it was not an issue, trees was not that critical as a parameter here
+best_auc
 
 
 ## 2.2  Run the models ----
@@ -258,7 +248,8 @@ final_res %>%
 # ref: https://stackoverflow.com/questions/62687664/map-tidymodels-process-to-a-list-group-by-or-nest
 
 #Custom function to map it over month, with the parameters obtained from the tuning
-#setup of the RF model
+
+# First setup of the RF model
 
 n.cores= parallel::detectCores()-1
 
@@ -290,7 +281,6 @@ predict_RF_grime <- function(df) {
     recipe(Log_CH4mean ~.) %>% 
     step_center(all_predictors(), -all_outcomes()) %>%
     step_scale(all_predictors(), -all_outcomes()) 
-  
 
  #fit workflow on train data
   fit_wf <-
@@ -346,25 +336,25 @@ monthly_models <- lst(
   rowwise() %>%
   mutate( preds = model_out[1],
           model_fit = model_out[2]) %>% 
-  select(-data, -model_out)
+  dplyr::select(-data, -model_out)
 
-#plot them. firs we do nicer labels for the months
-labelled_months <- tibble(month_label = tolower(month.abb), labels =month.name)
+#plot them. first we do nicer labels for the months
+labelled_months <- tibble(month_label = tolower(month.abb), labels = month.name)
 
 #extract the model predicition data for plotting model performance
 monthly_models_unnested <- monthly_models %>% 
-  mutate(month_label= fct_relevel(month_label, levels = toupper(month.abb))) %>% 
+  mutate(month_label = fct_relevel(month_label, levels = toupper(month.abb))) %>% 
   unnest(preds)  %>% 
   left_join(labelled_months, by = "month_label") %>% 
   mutate(labels = fct_relevel(labels, month.name)) 
 
-#calculate the RMSE
+#calculate the RMSE for label sin the plot
 rms_text <- monthly_models_unnested %>% 
   group_by(labels) %>% 
   summarise(rmse = exp(sqrt(mean((Log_CH4mean - .pred)^2))) - 0.1 ) %>% 
-  mutate(rms_label= paste("RMSE = ", round(rmse, 2) ))
+  mutate(rms_label = paste("RMSE = ", round(rmse, 2) ))
 
-# plot model predicitons vs observation of the testing dataset  
+# plot model predictions vs observation of the testing dataset  
 ggplot(monthly_models_unnested, aes(exp(.pred), exp(Log_CH4mean)))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
@@ -413,22 +403,30 @@ ggplot(monthly_models_unnested, aes( x=Log_CH4mean-.pred))+
         strip.background = element_rect(fill="white"),
         strip.text = element_text(size=12))
 
-#variable importance . make a simple function to map through the df
+#variable importance. make a simple function to map through the df
 get_vi_vals <- function(data){
   data %>% 
     extract_fit_parsnip() %>% 
     vi()
 }
 
-
+#get the monthly variable importance. First we find out which are the 20 most important
+vi_20_most <- map(monthly_models[[3]], get_vi_vals)  %>% 
+  set_names(monthly_models[[1]]) %>% 
+  map_df( ~ as.data.frame(.x), .id="month") %>% 
+  group_by(Variable) %>% 
+  summarise(Importance = median(Importance) ) %>%
+  arrange(desc(Importance)) %>% 
+  slice(1:20)
+ 
+#now we get the monthly values to do some stats
 vi_monthly <- map(monthly_models[[3]], get_vi_vals)  %>% 
   set_names(monthly_models[[1]]) %>% 
-  map_df( ~as.data.frame(.x), .id="month") %>% 
-  left_join(labeller_vars, by=c("Variable" = "var")  )  %>%
-  group_by(Variable) %>% 
-  filter(median(Importance)> .04657) %>%
-  ungroup() %>% 
-  mutate(type = str_replace(type, "Biogeochemical", "Biological"))
+  map_df( ~ as.data.frame(.x), .id="month") %>% 
+  filter(Variable %in% vi_20_most$Variable) %>% 
+  left_join(labeller_vars, by = c("Variable" = "var"))  %>%
+  mutate(type = str_replace(type, "Biogeochemical", "Biological")) %>% 
+  as_tibble()
 
 vi_monthly_mean <- vi_monthly %>% 
   group_by(Variable) %>% 
@@ -440,9 +438,7 @@ vi_monthly_mean <- vi_monthly %>%
   mutate(label= factor(label, unique(label)))
 
 
-vi_plot <- vi_monthly %>% 
-ggplot( aes(x=Importance, 
-              y=  reorder(label, sqrt(Importance), FUN = mean)))+
+vi_plot <- ggplot(vi_monthly,  aes(x = Importance, y = reorder(label, sqrt(Importance), FUN = mean)))+
   stat_summary( aes(fill = type), color=NA, geom="bar", fun="mean", alpha=.8)+
   stat_summary(fun.data = mean_sd, geom = "linerange", size=1.5, alpha=.6)+
   scale_x_continuous(expand = c(0,0), trans = "sqrt")+
@@ -455,7 +451,7 @@ ggplot( aes(x=Importance,
 set.seed(123)
 
 
-#Run the model for each month in a map
+#Run the model yearly
 yearly_model <- grimeDB_attr_trans %>%
   select(-biome_label) %>% 
   group_by(COMID) %>% 
