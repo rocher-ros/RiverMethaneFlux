@@ -204,7 +204,8 @@ print(k %>%
   dbf <- dbf %>% 
     left_join(k, by= 'COMID') %>% 
     left_join(k_sd, by= 'COMID') %>% 
-    left_join(temp, by= 'COMID')
+    left_join(temp, by= 'COMID') %>% 
+    left_join(vel %>% select(COMID, ends_with("_V")), by= 'COMID')
   
   if(i==1){
     df <- dbf
@@ -224,6 +225,23 @@ df <- df %>%
 
 #saving the results
 df %>% 
-  select(-ends_with("Ta")) %>% 
+  select(-ends_with(c("Ta", "_V"))) %>% 
   write_csv('data/processed/q_and_k.csv')
 
+means_reaches <- df %>% 
+  rowwise() %>% 
+  mutate(mean_k = mean(Jan_k:Dec_k),
+         mean_vel = mean(Jan_V:Dec_V)) %>% 
+  group_by(strmOrder) %>% 
+  summarise(n = n(),
+            length = mean(Length),
+            slope = mean(Slope),
+            vel = mean(mean_vel),
+            k = mean(mean_k),
+            q = mean(yeaQmean)) %>% 
+  arrange(strmOrder)
+
+means_reaches %>% 
+  mutate(depth = exp(-0.895 + 0.294*log(q)),
+         bigK= k/depth,
+         footprint = 3*(vel*3600*24)/bigK)

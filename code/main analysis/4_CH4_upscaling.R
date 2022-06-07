@@ -484,9 +484,42 @@ df <- df %>%
   filter(!HYBAS_ID %in% c("1040040050","2040059370","5040055420"),
          !is.na(Apr_k)) #basins have no valid rivArea
 
+q_to_vel <- function(q){
+  exp(0.12 * log(q) - 1.06)
+}
+
+q_to_depth <- function(q){
+  exp(-0.895 + 0.294*log(q))
+}
+
 #ch4 flux for each reach, in g C m^-2 d^-1, but excluding the ones with width below 0.3 meters
 df <- df %>% 
-  mutate(Jan_ch4F = Jan_ch4ex*Jan_k*12/1000*(JanWidth >= 0.3),
+  mutate(
+         Jan_L95 = (3*3600*24*q_to_vel(JanQmean) * q_to_depth(JanQmean))/Jan_k,
+         Feb_L95 = (3*3600*24*q_to_vel(FebQmean) * q_to_depth(FebQmean))/Feb_k,
+         Mar_L95 = (3*3600*24*q_to_vel(MarQmean) * q_to_depth(MarQmean))/Mar_k,
+         Apr_L95 = (3*3600*24*q_to_vel(AprQmean) * q_to_depth(AprQmean))/Apr_k,
+         May_L95 = (3*3600*24*q_to_vel(MayQmean) * q_to_depth(MayQmean))/May_k,
+         Jun_L95 = (3*3600*24*q_to_vel(JunQmean) * q_to_depth(JunQmean))/Jun_k,
+         Jul_L95 = (3*3600*24*q_to_vel(JulQmean) * q_to_depth(JulQmean))/Jul_k,
+         Aug_L95 = (3*3600*24*q_to_vel(AugQmean) * q_to_depth(AugQmean))/Aug_k,
+         Sep_L95 = (3*3600*24*q_to_vel(SepQmean) * q_to_depth(SepQmean))/Sep_k,
+         Oct_L95 = (3*3600*24*q_to_vel(OctQmean) * q_to_depth(OctQmean))/Oct_k,
+         Nov_L95 = (3*3600*24*q_to_vel(NovQmean) * q_to_depth(NovQmean))/Nov_k,
+         Dec_L95 = (3*3600*24*q_to_vel(DecQmean) * q_to_depth(DecQmean))/Dec_k,
+         Jan_k2 = ifelse(Jan_L95 < Length, (Length*q_to_depth(JanQmean))/(3*3600*24*q_to_vel(JanQmean)) , Jan_k ),
+         Feb_k2 = ifelse(Feb_L95 < Length, (Length*q_to_depth(FebQmean))/(3*3600*24*q_to_vel(FebQmean)) , Feb_k ),
+         Mar_k2 = ifelse(Mar_L95 < Length, (Length*q_to_depth(MarQmean))/(3*3600*24*q_to_vel(MarQmean)) , Mar_k ),
+         Apr_k2 = ifelse(Apr_L95 < Length, (Length*q_to_depth(AprQmean))/(3*3600*24*q_to_vel(AprQmean)) , Apr_k ),
+         May_k2 = ifelse(May_L95 < Length, (Length*q_to_depth(MayQmean))/(3*3600*24*q_to_vel(MayQmean)) , May_k ),
+         Jun_k2 = ifelse(Jun_L95 < Length, (Length*q_to_depth(JunQmean))/(3*3600*24*q_to_vel(JunQmean)) , Jun_k ),
+         Jul_k2 = ifelse(Jul_L95 < Length, (Length*q_to_depth(JulQmean))/(3*3600*24*q_to_vel(JulQmean)) , Jul_k ),
+         Aug_k2 = ifelse(Aug_L95 < Length, (Length*q_to_depth(AugQmean))/(3*3600*24*q_to_vel(AugQmean)) , Aug_k ),
+         Sep_k2 = ifelse(Sep_L95 < Length, (Length*q_to_depth(SepQmean))/(3*3600*24*q_to_vel(SepQmean)) , Sep_k ),
+         Oct_k2 = ifelse(Oct_L95 < Length, (Length*q_to_depth(OctQmean))/(3*3600*24*q_to_vel(OctQmean)) , Oct_k ),
+         Nov_k2 = ifelse(Nov_L95 < Length, (Length*q_to_depth(NovQmean))/(3*3600*24*q_to_vel(NovQmean)) , Nov_k ),
+         Dec_k2 = ifelse(Dec_L95 < Length, (Length*q_to_depth(DecQmean))/(3*3600*24*q_to_vel(DecQmean)) , Dec_k ),
+         Jan_ch4F = Jan_ch4ex*Jan_k*12/1000*(JanWidth >= 0.3),
          Feb_ch4F = Feb_ch4ex*Feb_k*12/1000*(FebWidth >= 0.3),
          Mar_ch4F = Mar_ch4ex*Mar_k*12/1000*(MarWidth >= 0.3),
          Apr_ch4F = Apr_ch4ex*Apr_k*12/1000*(AprWidth >= 0.3),
@@ -524,6 +557,17 @@ df <- df %>%
          Dec_ch4F_cv = sqrt((Dec_ch4_sd/Dec_ch4ex)^2 + (Dec_k_sd/Dec_k)^2)/(Dec_ch4ex*Dec_k)*100
   ) 
 
+footprints <- df %>% select(COMID, Length, ends_with("L95" )) %>% 
+  pivot_longer(-c(Length, COMID), names_to = "month", values_to = "footprint" ) %>% 
+  mutate(month = str_remove(month, "_.*"))
+
+
+ggplot(footprints)+
+  geom_histogram(aes(x=footprint), fill="red", alpha=.5, color=NA, bins= 100)+
+  geom_histogram(aes(x=Length), fill="gray50", alpha=.5, color=NA, bins= 100)+
+  scale_x_log10(labels=scales::number)+
+  theme_classic()
+
 #cap fluxes at 2 SD:
 main_stats <- df %>% 
   select(COMID, ends_with("ch4F")) %>% 
@@ -549,7 +593,7 @@ names(icecov) <- c('HYBAS_ID', paste0( month.abb, '_iceCov'))
 df <- df %>% 
   mutate(HYBAS_ID = as.character(HYBAS_ID)) %>% 
   left_join(icecov, by = 'HYBAS_ID') %>%
-  mutate(across(ends_with("ch4F"), ~ifelse(.x > two_SD, two_SD, .x))) %>% #this line caps fluxes at two SD
+  #mutate(across(ends_with("ch4F"), ~ifelse(.x > two_SD, two_SD, .x))) %>% #this line caps fluxes at two SD
   mutate(Jan_ch4E = Jan_ch4F*Length*JanWidth*(1-Jantimedryout)*(1-Jan_iceCov)*31,
          Feb_ch4E = Feb_ch4F*Length*FebWidth*(1-Febtimedryout)*(1-Feb_iceCov)*28,
          Mar_ch4E = Mar_ch4F*Length*MarWidth*(1-Martimedryout)*(1-Mar_iceCov)*31,

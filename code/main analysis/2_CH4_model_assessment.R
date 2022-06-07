@@ -7,7 +7,7 @@
 
 # 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'tidymodels', 'lubridate', 'vip', 'corrr', 'ggpubr', 'DALEXtra', 'ggtext', 'patchwork')
+package_list <- c('tidyverse', 'tidymodels', 'ranger', 'lubridate', 'vip', 'corrr', 'ggpubr', 'DALEXtra','doParallel' , 'ggtext', 'patchwork')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
