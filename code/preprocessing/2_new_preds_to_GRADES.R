@@ -709,3 +709,138 @@ runoff_good %>%
 
 
 write_csv(runoff_good, "data/raw/gis/GRADES_attributes/runoff.csv")
+
+
+# Aridity index, monthly ----
+
+sf::sf_use_s2(FALSE)
+
+grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  dplyr::select(COMID, lon = lon_mid, lat = lat_mid) %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326)
+
+files_aridity <- list.files("data/raw/gis/global ET/Global-AI_v3_monthly")[grepl(".tif$", list.files("data/raw/gis/global ET/Global-AI_v3_monthly"))]
+
+aridity <- terra::rast(paste0( "data/raw/gis/global ET/Global-AI_v3_monthly/",files_aridity))
+
+plot(aridity[[6]])
+
+
+dat_out <- tibble(COMID = grades$COMID,
+                  aridity_jan = terra::extract( aridity[[1]], st_coordinates(grades))$awi_pm_sr_01,
+                  aridity_feb = terra::extract( aridity[[2]], st_coordinates(grades))$awi_pm_sr_02,
+                  aridity_mar = terra::extract( aridity[[3]], st_coordinates(grades))$awi_pm_sr_03,
+                  aridity_apr = terra::extract( aridity[[4]], st_coordinates(grades))$awi_pm_sr_04,
+                  aridity_may = terra::extract( aridity[[5]], st_coordinates(grades))$awi_pm_sr_05,
+                  aridity_jun = terra::extract( aridity[[6]], st_coordinates(grades))$awi_pm_sr_06,
+                  aridity_jul = terra::extract( aridity[[7]], st_coordinates(grades))$awi_pm_sr_07,
+                  aridity_aug = terra::extract( aridity[[8]], st_coordinates(grades))$awi_pm_sr_08,
+                  aridity_sep = terra::extract( aridity[[9]], st_coordinates(grades))$awi_pm_sr_09,
+                  aridity_oct = terra::extract( aridity[[10]], st_coordinates(grades))$awi_pm_sr_10,
+                  aridity_nov = terra::extract( aridity[[11]], st_coordinates(grades))$awi_pm_sr_11,
+                  aridity_dec = terra::extract( aridity[[12]], st_coordinates(grades))$awi_pm_sr_12) 
+
+#some are missing due to unoverlaps with layers
+dat_out %>% filter(is.na(aridity_jul) == TRUE)
+
+#we separate the completed ones with the missing ones
+aridity_withdata <-  dat_out %>% 
+  drop_na(aridity_jun) %>% 
+  left_join(grades) %>% 
+  st_sf()
+
+aridity_missing <- dat_out %>%
+  filter_all(any_vars(is.na(.))) %>% 
+  dplyr::select(COMID)  %>% 
+  left_join(grades) %>% 
+  st_sf()
+
+
+#find nearest point with data
+nearest <- st_nearest_feature(aridity_missing, aridity_withdata)
+
+
+aridity_filled <- cbind(aridity_missing, st_drop_geometry(aridity_withdata)[nearest,]) %>% 
+  dplyr::select(- COMID.1) 
+
+#join with both filled datasets
+aridity_good <- bind_rows(aridity_withdata %>% st_drop_geometry(), 
+                         aridity_filled %>% st_drop_geometry()) %>% 
+  rowwise() %>% 
+  mutate(aridity_yr = mean(aridity_jan:aridity_dec))
+
+aridity_good %>% 
+  filter(is.na(aridity_jul) == TRUE)
+
+
+write_csv(aridity_good, "data/raw/gis/GRADES_attributes/aridity.csv")
+
+# NEE, monthly ----
+
+sf::sf_use_s2(TRUE)
+
+
+
+NEE_mon <- raster::brick("data/raw/gis/NEE/GCAS2021_gridded_fluxes/GCAS2021_monthlyflux_1x1.nc")
+
+NEE_mon
+
+
+grades <- read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
+  dplyr::select(COMID, lon = lon_mid, lat = lat_mid) %>% 
+  mutate(lon = ifelse(lon< 0, 180 + (180 + lon), lon )) %>% 
+  st_as_sf( coords = c("lon", "lat"),  crs = 4326) 
+
+crs(NEE_mon)
+crs(grades)
+
+
+
+nee_index <- tibble(names = names(NEE_mon),
+                       year= rep(2010:2019, each = 12),
+                       month = rep(1:12, times = 10))
+
+nee_jan <- subset(NEE_mon, nee_index$names[nee_index$month == 1] ) %>% mean(., na.rm = TRUE) 
+nee_feb <- subset(NEE_mon, nee_index$names[nee_index$month == 2] ) %>% mean(., na.rm = TRUE) 
+nee_mar <- subset(NEE_mon, nee_index$names[nee_index$month == 3] ) %>% mean(., na.rm = TRUE) 
+nee_apr <- subset(NEE_mon, nee_index$names[nee_index$month == 4] ) %>% mean(., na.rm = TRUE) 
+nee_may <- subset(NEE_mon, nee_index$names[nee_index$month == 5] ) %>% mean(., na.rm = TRUE) 
+nee_jun <- subset(NEE_mon, nee_index$names[nee_index$month == 6] ) %>% mean(., na.rm = TRUE) 
+nee_jul <- subset(NEE_mon, nee_index$names[nee_index$month == 7] ) %>% mean(., na.rm = TRUE) 
+nee_aug <- subset(NEE_mon, nee_index$names[nee_index$month == 8] ) %>% mean(., na.rm = TRUE) 
+nee_sep <- subset(NEE_mon, nee_index$names[nee_index$month == 9] ) %>% mean(., na.rm = TRUE) 
+nee_oct <- subset(NEE_mon, nee_index$names[nee_index$month == 10] ) %>% mean(., na.rm = TRUE) 
+nee_nov <- subset(NEE_mon, nee_index$names[nee_index$month == 11] ) %>% mean(., na.rm = TRUE) 
+nee_dec <- subset(NEE_mon, nee_index$names[nee_index$month == 12] ) %>% mean(., na.rm = TRUE) 
+
+
+plot(nee_jan)
+
+dat_out <- tibble(COMID = grades$COMID, 
+                  nee_jan = raster::extract( nee_jan, st_coordinates(grades)),
+                  nee_feb = raster::extract( nee_feb, st_coordinates(grades)),
+                  nee_mar = raster::extract( nee_mar, st_coordinates(grades)),
+                  nee_apr = raster::extract( nee_apr, st_coordinates(grades)),
+                  nee_may = raster::extract( nee_may, st_coordinates(grades)),
+                  nee_jun = raster::extract( nee_jun, st_coordinates(grades)),
+                  nee_jul = raster::extract( nee_jul, st_coordinates(grades)),
+                  nee_aug = raster::extract( nee_aug, st_coordinates(grades)),
+                  nee_sep = raster::extract( nee_sep, st_coordinates(grades)),
+                  nee_oct = raster::extract( nee_oct, st_coordinates(grades)),
+                  nee_nov = raster::extract( nee_nov, st_coordinates(grades)),
+                  nee_dec = raster::extract( nee_dec, st_coordinates(grades))) 
+
+missing <- dat_out %>% 
+  filter(is.na(nee_jan) == TRUE) %>% 
+  left_join(grades) %>% 
+  st_sf()
+
+ggplot(sample_n(dat_out, size = 100000))+
+  geom_sf(aes(color = nee_jul),  size= .3)+
+  scale_color_viridis_c()
+
+nee_good <- dat_out %>% 
+  rowwise() %>% 
+  mutate(nee_yr = mean(nee_jan:nee_dec))
+
+write_csv(nee_good, "data/raw/gis/GRADES_attributes/nee_monthly.csv")

@@ -143,6 +143,12 @@ colnames(biomes)
 runoff <- read_csv("data/raw/gis/GRADES_attributes/runoff.csv") 
 colnames(runoff)
 
+aridity <- read_csv("data/raw/gis/GRADES_attributes/aridity.csv")
+colnames(aridity)
+
+nee <- read_csv("data/raw/gis/GRADES_attributes/nee_monthly.csv")
+colnames(nee)
+
 
 #read coordinates from grades
 grades_latlon <-  read_csv("data/raw/gis/GRADES_attributes/grades_coords.csv") %>% 
@@ -199,6 +205,8 @@ grades_attributes <-  annPP %>%
   left_join(peatlands, by ="COMID") %>% 
   left_join(biomes, by ="COMID") %>% 
   left_join(runoff, by ="COMID") %>% 
+  left_join(aridity, by ="COMID") %>% 
+  left_join(nee, by ="COMID") %>% 
   drop_na(q_jan) %>% 
   distinct(COMID, .keep_all = TRUE)
 

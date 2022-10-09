@@ -8,7 +8,7 @@
 # List of all packages needed
 package_list <- c('tidyverse', 'lubridate')
 
-# Check if there are any packacges missing
+# Check if there are any packages missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
 
 # If we find a package missing, install them
@@ -46,7 +46,7 @@ sites_clean <- sites_df %>%
 conc_df_comids <- conc_df %>% 
   filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
   left_join(sites_clean, by="Site_Nid") %>% 
-  dplyr::select(Site_Nid, `Aggregated?`, Channel_type, COMID, distance_snapped, slope_m_m, CH4mean, CO2mean,
+  dplyr::select(Site_Nid, `Aggregated?`, Channel_type, COMID, distance_snapped, CH4mean, CO2mean,
                 date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  ) %>% 
   mutate(CH4mean =ifelse(CH4mean < 0.0001, 0.0001, CH4mean)) %>% 
   drop_na(CH4mean)
@@ -57,6 +57,9 @@ grades_attributes <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE
 #Now attach all the annual variables to each pair of site_obs in the conc df 
 grimeDB_attributes <- conc_df_comids %>% 
   left_join(grades_attributes, by="COMID")
+
+colnames(grimeDB_attributes)
+colnames(grimeDB_attributes)[grepl("_jan", colnames(grimeDB_attributes))]
 
 # Now we do the monthly resolved variables, needs some thinking...
 # Ok the way is to check the month of each observation and then match the value of a given variable
@@ -180,7 +183,32 @@ grimeDB_attributes_mon <- grimeDB_attributes %>%
                                   month(date) == 9 ~ sresp_sep*365,
                                   month(date) == 10 ~ sresp_oct*365,
                                   month(date) == 11 ~ sresp_nov*365,
-                                  month(date) == 12 ~ sresp_dec*365) ) %>%
+                                  month(date) == 12 ~ sresp_dec*365),
+          aridity_month = case_when(month(date) == 1 ~ aridity_jan,
+                                   month(date) == 2 ~ aridity_feb,
+                                   month(date) == 3 ~ aridity_mar,
+                                   month(date) == 4 ~ aridity_apr,
+                                   month(date) == 5 ~ aridity_may,
+                                   month(date) == 6 ~ aridity_jun,
+                                   month(date) == 7 ~ aridity_jul,
+                                   month(date) == 8 ~ aridity_aug,
+                                   month(date) == 9 ~ aridity_sep,
+                                   month(date) == 10 ~ aridity_oct,
+                                   month(date) == 11 ~ aridity_nov,
+                                   month(date) == 12 ~ aridity_dec),
+          nee_month = case_when(month(date) == 1 ~ nee_jan,
+                                    month(date) == 2 ~ nee_feb,
+                                    month(date) == 3 ~ nee_mar,
+                                    month(date) == 4 ~ nee_apr,
+                                    month(date) == 5 ~ nee_may,
+                                    month(date) == 6 ~ nee_jun,
+                                    month(date) == 7 ~ nee_jul,
+                                    month(date) == 8 ~ nee_aug,
+                                    month(date) == 9 ~ nee_sep,
+                                    month(date) == 10 ~ nee_oct,
+                                    month(date) == 11 ~ nee_nov,
+                                    month(date) == 12 ~ nee_dec),
+          ) %>%
   dplyr::select(!ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")))
 
 # quickly check one site

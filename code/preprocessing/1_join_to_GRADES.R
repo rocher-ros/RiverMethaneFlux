@@ -122,8 +122,7 @@ sample_n(africa, 1000) %>%
 
 #find the nearest GRADES network
 nearest <- st_nearest_feature(sites_in_africa, africa)
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
+
 
 #get the distance that has been snapped as a QAQC
 distance_snapped <- st_distance(sites_in_africa, africa[nearest,], by_element = TRUE) %>% 
@@ -170,8 +169,7 @@ sample_n(europe, 2000) %>%
 
 #find the nearest GRADES network
 nearest <- st_nearest_feature(sites_in_europe, europe)
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
+
 
 #get the distance that has been snapped as a QAQC
 distance_snapped <- st_distance(sites_in_europe, europe[nearest,], by_element = TRUE) %>% 
@@ -222,8 +220,7 @@ sample_n(asia, 5000) %>%
 
 #find the nearest GRADES network
 nearest <- st_nearest_feature(sites_in_asia, asia)
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
+
 
 #get the distance that has been snapped as a QAQC
 distance_snapped <- st_distance(sites_in_asia, asia[nearest,], by_element = TRUE) %>% 
@@ -271,8 +268,7 @@ sample_n(oceania, 2000) %>%
 
 #find the nearest GRADES network
 nearest <- st_nearest_feature(sites_in_oceania, oceania)
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
+
 
 #get the distance that has been snapped as a QAQC
 distance_snapped <- st_distance(sites_in_oceania, oceania[nearest,], by_element = TRUE) %>% 
@@ -329,8 +325,7 @@ sites_in_america <- sites_in_america %>% filter(!Site_Nid == "7352")
 
 #find the nearest GRADES network
 nearest <- st_nearest_feature(sites_in_america, america)
-#blip when done
-system("rundll32 user32.dll,MessageBeep -1")
+
 
 #get the distance that has been snapped as a QAQC
 distance_snapped <- st_distance(sites_in_america, america[nearest,], by_element = TRUE) %>% as.vector()

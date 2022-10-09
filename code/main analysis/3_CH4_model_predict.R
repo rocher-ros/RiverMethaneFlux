@@ -113,7 +113,7 @@ rf_mod <-
   rand_forest(
     mtry = 8,
     trees = 1000,
-    min_n = 6 ) %>%
+    min_n = 8 ) %>%
   set_mode("regression") %>%
   set_engine("ranger", num.threads = n.cores)
 

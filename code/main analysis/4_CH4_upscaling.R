@@ -1,7 +1,7 @@
 ########################################.
 #### Script upscale CH4 emissions in rivers globally.
 #### Author:  Gerard Rocher-Ros, modified from Shaoda Liu
-#### Last edit: 2022-05-10
+#### Last edit: 2022-09-10
 ########################################.
 
 # Load  and install packages and functions ----
@@ -22,7 +22,7 @@ lapply(package_list, require, character.only = TRUE)
 # from temperature ( in Kelvin) and atm pressure (derived from elevation (in m.a.s.l) for CH4 
 # Henry's Law constants from http://www.henrys-law.org
 # Temperature correction using van't Hoff equation , temperature is in (Kelvin)
-# Kh is in ("Kh, cp") = (mol/L*Atm) at STP
+# Kh is in ("Kh, cp") = (mol*L^-1* Atm^-1) at STP
 # Concentrations (mole fraction, also ppmv) in the atmosphere are approximate for 2013, should be updated over time
 # AtmP is in (atmospheres)
 
@@ -31,7 +31,7 @@ get_Ch4eq <- function(temperature, elevation){
   pressure <- (1-(.0000225577*elevation))^5.25588
   Kh <- (1.4*10^-3)*exp(1700*((1/temperature)-(1/298)))
   AtmosphereConc <-  1.83
-  EquilSaturation <- AtmosphereConc*Kh/pressure #umol/L, mmol/m3
+  EquilSaturation <- AtmosphereConc*Kh*pressure #umol/L, mmol/m3
   
   return(EquilSaturation)
 }
@@ -44,7 +44,9 @@ timedryout_calculater <- function(Q) {
 # Load files ----
 
 # load file with discharge and k data 
-hydro_k <- read_csv("data/processed/q_and_k.csv")
+hydro_k <- read_csv("data/processed/q_and_k.csv") #%>%  
+  # Uncomment to cap fluxes with a k threshold based on Ulseth et al. 2018
+   #mutate(across(ends_with("_k"), ~ifelse( .x > 35, 35, .x)))
 
 #upscaled methane concentrations
 #mean estimates are "month_ch4", while SD are "month_ch4_sd"
@@ -146,6 +148,7 @@ df <- df %>%
 for(mon in month.abb){
   df[df[, paste0(mon, 'Qmean')] >= 60, paste0(mon, 'timedryout')] = 0
 }
+
 # Extrapolation to small streams ----
 ## Find larger basins for all GRADES to do the extrapolation
 #### generate working basins for SO extrapolation####
@@ -495,30 +498,32 @@ q_to_depth <- function(q){
 #ch4 flux for each reach, in g C m^-2 d^-1, but excluding the ones with width below 0.3 meters
 df <- df %>% 
   mutate(
-         Jan_L95 = (3*3600*24*q_to_vel(JanQmean) * q_to_depth(JanQmean))/Jan_k,
-         Feb_L95 = (3*3600*24*q_to_vel(FebQmean) * q_to_depth(FebQmean))/Feb_k,
-         Mar_L95 = (3*3600*24*q_to_vel(MarQmean) * q_to_depth(MarQmean))/Mar_k,
-         Apr_L95 = (3*3600*24*q_to_vel(AprQmean) * q_to_depth(AprQmean))/Apr_k,
-         May_L95 = (3*3600*24*q_to_vel(MayQmean) * q_to_depth(MayQmean))/May_k,
-         Jun_L95 = (3*3600*24*q_to_vel(JunQmean) * q_to_depth(JunQmean))/Jun_k,
-         Jul_L95 = (3*3600*24*q_to_vel(JulQmean) * q_to_depth(JulQmean))/Jul_k,
-         Aug_L95 = (3*3600*24*q_to_vel(AugQmean) * q_to_depth(AugQmean))/Aug_k,
-         Sep_L95 = (3*3600*24*q_to_vel(SepQmean) * q_to_depth(SepQmean))/Sep_k,
-         Oct_L95 = (3*3600*24*q_to_vel(OctQmean) * q_to_depth(OctQmean))/Oct_k,
-         Nov_L95 = (3*3600*24*q_to_vel(NovQmean) * q_to_depth(NovQmean))/Nov_k,
-         Dec_L95 = (3*3600*24*q_to_vel(DecQmean) * q_to_depth(DecQmean))/Dec_k,
-         Jan_k2 = ifelse(Jan_L95 < Length, (Length*q_to_depth(JanQmean))/(3*3600*24*q_to_vel(JanQmean)) , Jan_k ),
-         Feb_k2 = ifelse(Feb_L95 < Length, (Length*q_to_depth(FebQmean))/(3*3600*24*q_to_vel(FebQmean)) , Feb_k ),
-         Mar_k2 = ifelse(Mar_L95 < Length, (Length*q_to_depth(MarQmean))/(3*3600*24*q_to_vel(MarQmean)) , Mar_k ),
-         Apr_k2 = ifelse(Apr_L95 < Length, (Length*q_to_depth(AprQmean))/(3*3600*24*q_to_vel(AprQmean)) , Apr_k ),
-         May_k2 = ifelse(May_L95 < Length, (Length*q_to_depth(MayQmean))/(3*3600*24*q_to_vel(MayQmean)) , May_k ),
-         Jun_k2 = ifelse(Jun_L95 < Length, (Length*q_to_depth(JunQmean))/(3*3600*24*q_to_vel(JunQmean)) , Jun_k ),
-         Jul_k2 = ifelse(Jul_L95 < Length, (Length*q_to_depth(JulQmean))/(3*3600*24*q_to_vel(JulQmean)) , Jul_k ),
-         Aug_k2 = ifelse(Aug_L95 < Length, (Length*q_to_depth(AugQmean))/(3*3600*24*q_to_vel(AugQmean)) , Aug_k ),
-         Sep_k2 = ifelse(Sep_L95 < Length, (Length*q_to_depth(SepQmean))/(3*3600*24*q_to_vel(SepQmean)) , Sep_k ),
-         Oct_k2 = ifelse(Oct_L95 < Length, (Length*q_to_depth(OctQmean))/(3*3600*24*q_to_vel(OctQmean)) , Oct_k ),
-         Nov_k2 = ifelse(Nov_L95 < Length, (Length*q_to_depth(NovQmean))/(3*3600*24*q_to_vel(NovQmean)) , Nov_k ),
-         Dec_k2 = ifelse(Dec_L95 < Length, (Length*q_to_depth(DecQmean))/(3*3600*24*q_to_vel(DecQmean)) , Dec_k ),
+         Jan_L95 = 3*3600*24*q_to_vel(JanQmean) /(Jan_k/q_to_depth(JanQmean)),
+         Feb_L95 = 3*3600*24*q_to_vel(FebQmean) /(Feb_k/q_to_depth(FebQmean)),
+         Mar_L95 = 3*3600*24*q_to_vel(MarQmean) /(Mar_k/q_to_depth(MarQmean)),
+         Apr_L95 = 3*3600*24*q_to_vel(AprQmean) /(Apr_k/q_to_depth(AprQmean)),
+         May_L95 = 3*3600*24*q_to_vel(MayQmean) /(May_k/q_to_depth(MayQmean)),
+         Jun_L95 = 3*3600*24*q_to_vel(JunQmean) /(Jun_k/q_to_depth(JunQmean)),
+         Jul_L95 = 3*3600*24*q_to_vel(JulQmean) /(Jul_k/q_to_depth(JulQmean)),
+         Aug_L95 = 3*3600*24*q_to_vel(AugQmean) /(Aug_k/q_to_depth(AugQmean)),
+         Sep_L95 = 3*3600*24*q_to_vel(SepQmean) /(Sep_k/q_to_depth(SepQmean)),
+         Oct_L95 = 3*3600*24*q_to_vel(OctQmean) /(Oct_k/q_to_depth(OctQmean)),
+         Nov_L95 = 3*3600*24*q_to_vel(NovQmean) /(Nov_k/q_to_depth(NovQmean)),
+         Dec_L95 = 3*3600*24*q_to_vel(DecQmean) /(Dec_k/q_to_depth(DecQmean)),
+         #Comment/ uncomment this chunk is to correct by footprint
+         Jan_k = ifelse(Jan_L95 < Length, (3*3600*24*q_to_vel(JanQmean)*q_to_depth(JanQmean))/(Length), Jan_k ),
+         Feb_k = ifelse(Feb_L95 < Length, (3*3600*24*q_to_vel(FebQmean)*q_to_depth(FebQmean))/(Length), Feb_k ),
+         Mar_k = ifelse(Mar_L95 < Length, (3*3600*24*q_to_vel(MarQmean)*q_to_depth(MarQmean))/(Length), Mar_k ),
+         Apr_k = ifelse(Apr_L95 < Length, (3*3600*24*q_to_vel(AprQmean)*q_to_depth(AprQmean))/(Length), Apr_k ),
+         May_k = ifelse(May_L95 < Length, (3*3600*24*q_to_vel(MayQmean)*q_to_depth(MayQmean))/(Length), May_k ),
+         Jun_k = ifelse(Jun_L95 < Length, (3*3600*24*q_to_vel(JunQmean)*q_to_depth(JunQmean))/(Length), Jun_k ),
+         Jul_k = ifelse(Jul_L95 < Length, (3*3600*24*q_to_vel(JulQmean)*q_to_depth(JulQmean))/(Length), Jul_k ),
+         Aug_k = ifelse(Aug_L95 < Length, (3*3600*24*q_to_vel(AugQmean)*q_to_depth(AugQmean))/(Length), Aug_k ),
+         Sep_k = ifelse(Sep_L95 < Length, (3*3600*24*q_to_vel(SepQmean)*q_to_depth(SepQmean))/(Length), Sep_k ),
+         Oct_k = ifelse(Oct_L95 < Length, (3*3600*24*q_to_vel(OctQmean)*q_to_depth(OctQmean))/(Length), Oct_k ),
+         Nov_k = ifelse(Nov_L95 < Length, (3*3600*24*q_to_vel(NovQmean)*q_to_depth(NovQmean))/(Length), Nov_k ),
+         Dec_k = ifelse(Dec_L95 < Length, (3*3600*24*q_to_vel(DecQmean)*q_to_depth(DecQmean))/(Length), Dec_k ),
+         footprint_correction = Length / (3*3600*24*q_to_vel(yeaQmean) /(Jan_k/q_to_depth(yeaQmean))),
          Jan_ch4F = Jan_ch4ex*Jan_k*12/1000*(JanWidth >= 0.3),
          Feb_ch4F = Feb_ch4ex*Feb_k*12/1000*(FebWidth >= 0.3),
          Mar_ch4F = Mar_ch4ex*Mar_k*12/1000*(MarWidth >= 0.3),
@@ -557,31 +562,66 @@ df <- df %>%
          Dec_ch4F_cv = sqrt((Dec_ch4_sd/Dec_ch4ex)^2 + (Dec_k_sd/Dec_k)^2)/(Dec_ch4ex*Dec_k)*100
   ) 
 
-footprints <- df %>% select(COMID, Length, ends_with("L95" )) %>% 
-  pivot_longer(-c(Length, COMID), names_to = "month", values_to = "footprint" ) %>% 
-  mutate(month = str_remove(month, "_.*"))
+
+#total number of sites corrected
+df %>% 
+  summarise(frac_corrected = sum(ifelse(footprint_correction > 1, 1, 0))/n()*100)
+
+df %>% 
+  mutate(k_uncorrected = (2841 * Slope * q_to_vel(yeaQmean) + 2.02),
+         k_corrected = (3*3600*24*q_to_vel(yeaQmean)*q_to_depth(yeaQmean))/(Length)) %>% 
+  filter(footprint_correction > 1) %>% 
+  ggplot(aes(k_uncorrected, k_corrected, color= Slope))+
+  geom_point()+
+  geom_abline(slope =1, intercept = 0)+
+  scale_color_viridis_c(trans = "sqrt")
+
+df %>% 
+  mutate(k_uncorrected = (2841 * Slope * q_to_vel(yeaQmean) + 2.02),
+         k_corrected = (3*3600*24*q_to_vel(yeaQmean)*q_to_depth(yeaQmean))/(Length),
+         k_diff = (k_corrected - k_uncorrected)/k_uncorrected*100) %>% 
+  filter(footprint_correction > 1) %>% 
+  ggplot()+
+  geom_density(aes(k_diff))+
+  geom_vline(aes(xintercept = median(k_diff)))
+  
+  
+
+df %>% 
+  mutate(slope_cat = case_when(Slope < .001 ~ "< 0.001",
+                               Slope >= .001 & Slope < .01 ~ "0.001 - 0.01",
+                               Slope >= .01 & Slope < .1 ~ "0.01 - 0.1",
+                               Slope >= .1 & Slope < .2 ~ "0.1 - 0.2",
+                               Slope >= 0.2 ~ "> 0.2") %>% 
+           as_factor() %>% 
+           fct_relevel("< 0.001", "0.001 - 0.01", "0.01 - 0.1","0.1 - 0.2", "> 0.2"),
+         footprint_corrected = ifelse(footprint_correction > 1, 1, 0)) %>% 
+  group_by(slope_cat) %>% 
+  summarise(foot_corr = sum(footprint_corrected)/n(),
+            n= n()) %>% 
+  ggplot(aes(slope_cat, foot_corr*100))+
+  scale_y_continuous(expand = c(0,0), limits = c(0,40))+
+  geom_col()+
+  theme_classic()+
+  labs(x=" River reach slope categories", y = "% of reaches corrected")
 
 
-ggplot(footprints)+
-  geom_histogram(aes(x=footprint), fill="red", alpha=.5, color=NA, bins= 100)+
-  geom_histogram(aes(x=Length), fill="gray50", alpha=.5, color=NA, bins= 100)+
-  scale_x_log10(labels=scales::number)+
-  theme_classic()
+#ggsave("figures/supplementary/footprints_reach_slopes.png")
 
-#cap fluxes at 2 SD:
-main_stats <- df %>% 
-  select(COMID, ends_with("ch4F")) %>% 
-  pivot_longer(-COMID, values_to = "flux", names_to = "month_flux") %>% 
-  summarise(sd = sd(flux, na.rm = TRUE),
-            mean = mean(flux, na.rm = TRUE),,
-            median = median(flux, na.rm = TRUE),
-            max = max(flux, na.rm = TRUE),
-            min = min(flux, na.rm = TRUE), 
-            q.95 = quantile(flux, 0.95, na.rm = TRUE)) 
-
-main_stats
-
-two_SD <- main_stats$sd * 2
+#stats to cap fluxes at 2 SD, uncoment to do that 
+# main_stats <- df %>%
+#   select(COMID, ends_with("ch4F")) %>%
+#   pivot_longer(-COMID, values_to = "flux", names_to = "month_flux") %>%
+#   summarise(sd = sd(flux, na.rm = TRUE),
+#             mean = mean(flux, na.rm = TRUE),
+#             median = median(flux, na.rm = TRUE),
+#             max = max(flux, na.rm = TRUE),
+#             min = min(flux, na.rm = TRUE),
+#             q.95 = quantile(flux, 0.95, na.rm = TRUE))
+# 
+# main_stats
+#
+#two_SD <- main_stats$sd * 2
 
 #get ice coverage file
 icecov <- read_csv('data/processed/upscaling_extra_data/iceout.csv', 
@@ -593,6 +633,7 @@ names(icecov) <- c('HYBAS_ID', paste0( month.abb, '_iceCov'))
 df <- df %>% 
   mutate(HYBAS_ID = as.character(HYBAS_ID)) %>% 
   left_join(icecov, by = 'HYBAS_ID') %>%
+  #uncomment below to cap fluxes at 2SD
   #mutate(across(ends_with("ch4F"), ~ifelse(.x > two_SD, two_SD, .x))) %>% #this line caps fluxes at two SD
   mutate(Jan_ch4E = Jan_ch4F*Length*JanWidth*(1-Jantimedryout)*(1-Jan_iceCov)*31,
          Feb_ch4E = Feb_ch4F*Length*FebWidth*(1-Febtimedryout)*(1-Feb_iceCov)*28,
@@ -620,6 +661,66 @@ df <- df %>%
          Dec_ch4E_sd = Dec_ch4F_sd*Length*DecWidth*(1-Dectimedryout)*(1-Dec_iceCov)*31) 
 
 
+
+#### compare different flux calculations corrections, this needs to be run by commenting up and down multiple times so is disconnected by default
+# footprint_method <- df %>%
+#   select(COMID, ends_with(c("ch4","ch4F", "_k"))) %>%
+#   drop_na(Jan_k, Jan_ch4) %>%
+#   rowwise() %>%
+#   mutate(k = mean(Jan_k:Dec_k, na.rm = TRUE),
+#          ch4 = mean(Jan_ch4:Dec_ch4, na.rm = TRUE),
+#          flux = mean(Jan_ch4F:Dec_ch4F, na.rm = TRUE),
+#          method = "footprint") %>%
+#   select(method, k, ch4, flux)
+# 
+# write_csv(footprint_method, "data/processed/method_footprint.csv")
+
+# k_cap_method <- df %>% 
+#   select(COMID, ends_with(c("ch4","ch4F", "_k"))) %>% 
+#   drop_na(Jan_k, Jan_ch4) %>% 
+#   rowwise() %>% 
+#   mutate(k = mean(Jan_k:Dec_k, na.rm = TRUE),
+#          ch4 = mean(Jan_ch4:Dec_ch4, na.rm = TRUE),
+#          flux = mean(Jan_ch4F:Dec_ch4F, na.rm = TRUE),
+#          method = "k_cap") %>% 
+#   select(method, k, ch4, flux)
+# 
+# write_csv(k_cap_method, "data/processed/method_k.csv")
+
+# flux_cap_method <- df %>% 
+#   select(COMID, ends_with(c("ch4","ch4F", "_k"))) %>% 
+#   drop_na(Jan_k, Jan_ch4) %>% 
+#   rowwise() %>% 
+#   mutate(k = mean(Jan_k:Dec_k, na.rm = TRUE),
+#          ch4 = mean(Jan_ch4:Dec_ch4, na.rm = TRUE),
+#          flux = mean(Jan_ch4F:Dec_ch4F, na.rm = TRUE),
+#          method = "flux_cap") %>% 
+#   select(method, k, ch4, flux)
+# 
+# write_csv(flux_cap_method, "data/processed/method_flux.csv")
+
+# uncorrected <- df %>% 
+#   select(COMID, ends_with(c("ch4","ch4F", "_k"))) %>% 
+#   drop_na(Jan_k, Jan_ch4) %>% 
+#   rowwise() %>% 
+#   mutate(k = mean(Jan_k:Dec_k, na.rm = TRUE),
+#          ch4 = mean(Jan_ch4:Dec_ch4, na.rm = TRUE),
+#          flux = mean(Jan_ch4F:Dec_ch4F, na.rm = TRUE),
+#          method = "uncorrected") %>% 
+#   select(method, k, ch4, flux)
+# 
+# write_csv(uncorrected, "data/processed/uncorrected.csv")
+
+# paths_methods <- c("data/processed/uncorrected.csv",
+#                    "data/processed/method_k.csv",
+#                    "data/processed/method_flux.csv",
+#                    "data/processed/method_footprint.csv")
+# 
+# methods <- map_dfr(paths_methods, read_csv)
+# 
+# write_csv(methods, "data/processed/methods_flux_comparison.csv")
+# 
+# file.remove(paths_methods)
 
 ## Now we assign the upscaled emissions for each basin area, using the proportional catchment area of each basin
 #join res2
@@ -704,14 +805,24 @@ total_fluxes %>%
   select(COMID, ends_with(c("ch4E_extrap", "ch4E_reach"))) %>% 
   pivot_longer(-COMID, values_to = "flux", names_to = "type") %>% 
   mutate(type = str_remove(type, month.abb)) %>% 
-  group_by(type) %>% 
   summarise(total = sum(flux, na.rm = TRUE)/1e+12*16/12) #in TgCH4 / yr
+
 
 #sd propagated
 total_fluxes %>% 
   select(COMID, ends_with(c("ch4E_sd_extrap", "ch4E_sd_reach"))) %>% 
   pivot_longer(-COMID, values_to = "flux", names_to = "type") %>%
   summarise(total =sum(flux, na.rm = TRUE)/1e+12*16/12) #in TgCH4 / yr
+
+
+## Summary from the different methods :
+## Method ------- Total flux (Tg Ch4 yr-1)
+## _______________________________________
+## Footprint ------- 12.8
+## k capped -------- 11.3
+## Flux capped ----- 13.9
+## Uncorrected ----- 14.1
+
 
 
 

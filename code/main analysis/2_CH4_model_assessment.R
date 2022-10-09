@@ -193,7 +193,7 @@ tune_res
 # lets have a look...
 tune_res %>%
   collect_metrics() %>%
-  filter(.metric == "rsq") %>%
+  filter(.metric == "rmse") %>%
   select(mean, min_n, mtry) %>%
   pivot_longer(min_n:mtry,
                values_to = "value",
@@ -201,16 +201,17 @@ tune_res %>%
   ggplot(aes(value, mean, color = parameter)) +
   geom_point(show.legend = FALSE) +
   facet_wrap(~parameter, scales = "free_x") +
-  labs(x = NULL, y = "rsq")
+  labs(x = NULL, y = "rmse")
 
 rm(tune_res)
 
 #Do a more targeted tuning with a new grid
 rf_grid <- grid_regular(
   mtry(range = c(10,20)),
-  min_n(range = c(15, 30)),
-  levels = 20
+  min_n(range = c(3, 8)),
+  levels = 10
 )
+
 
 #tune the grid again
 set.seed(456)
@@ -223,7 +224,7 @@ regular_res <- tune_grid(
 # Let's check the results
 regular_res %>%
   collect_metrics() %>%
-  filter(.metric == "rsq") %>%
+  filter(.metric == "rmse") %>%
   select(mean, min_n, mtry) %>%
   ggplot(aes(mean, min_n, color = mtry)) +
   geom_point() +
@@ -232,7 +233,7 @@ regular_res %>%
   theme_bw()
 
 #select the best one and finish the model 
-best_auc <- select_best(regular_res, "rmse")
+best_auc <- select_best(regular_res, "rsq")
 
 # Best model has mtry = 8, trees = 1000, min_n = 6.
 #This workflow tuned only mtry and min_n, to do the trees you should re-run it changing the trees for min_n for example. 
@@ -251,9 +252,9 @@ n.cores= parallel::detectCores()-1
 
 rf_mod <-
   rand_forest(
-    mtry = 8,
+    mtry = 16,
     trees = 1000,
-    min_n = 6 ) %>%
+    min_n = 5 ) %>%
   set_mode("regression") %>%
   set_engine("ranger", importance="permutation", num.threads = n.cores)
 
@@ -356,7 +357,7 @@ ggplot(monthly_models_unnested, aes(exp(.pred), exp(Log_CH4mean)))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
   geom_text( data = rms_text,
-    mapping = aes(x = 20, y = .6, label =rms_label ))+
+    mapping = aes(x = 20, y = .6, label =rms_label), family = "Helvetica")+
   stat_cor(aes(label = ..rr.label..), label.y.npc = 0.1, label.x = 0.8)+ #put R2 and label
   labs(x = "**CH<sub>4</sub> predictions**<br>(mmol m<sup>-3</sup>)", 
        y = "**CH<sub>4</sub> observations** <br>(mmol m<sup>-3</sup>)")+
@@ -364,7 +365,8 @@ ggplot(monthly_models_unnested, aes(exp(.pred), exp(Log_CH4mean)))+
   scale_x_log10(labels=scales::number, limits=c(0.1, 200))+
   facet_wrap(~labels, ncol = 3)+
   theme_bw()+
-  theme(axis.title.y = ggtext::element_markdown(),
+  theme(text = element_text(family = "Helvetica"),
+        axis.title.y = ggtext::element_markdown(),
         axis.title.x = ggtext::element_markdown(),
         strip.background = element_rect(fill="white"),
         strip.text = element_text(size=12))
@@ -373,7 +375,7 @@ ggplot(monthly_models_unnested, aes(exp(.pred), exp(Log_CH4mean)))+
 ggsave(filename= "figures/supplementary/model_perf_monthly.png", width = 9, height = 8)
 
 #residuals vs predictions
-ggplot(monthly_models_unnested, aes(.pred, Log_CH4mean-.pred))+
+ggplot(monthly_models_unnested, aes(.pred, Log_CH4mean - .pred))+
   geom_point(alpha = .6)+
   geom_hline(yintercept = 0, linetype = 1)+
   geom_smooth( se = FALSE, linetype = 2, color = "red")+
@@ -381,10 +383,12 @@ ggplot(monthly_models_unnested, aes(.pred, Log_CH4mean-.pred))+
        y = "**Residuals** <br>log(mmol m<sup>-3</sup>)")+
   facet_wrap(~labels, ncol = 3)+
   theme_bw()+
-  theme(axis.title.y = ggtext::element_markdown(),
+  theme(text = element_text(family = "Helvetica"),
+        axis.title.y = ggtext::element_markdown(),
         axis.title.x = ggtext::element_markdown(),
         strip.background = element_rect(fill="white"),
         strip.text = element_text(size=12))
+
 
 
 ggsave(filename= "figures/supplementary/model_residuals_monthly.png", width = 9, height = 8)
@@ -413,7 +417,7 @@ vi_20_most <- map(monthly_models[[3]], get_vi_vals)  %>%
   set_names(monthly_models[[1]]) %>% 
   map_df( ~ as.data.frame(.x), .id="month") %>% 
   group_by(Variable) %>% 
-  summarise(Importance = median(Importance) ) %>%
+  summarise(Importance = mean(Importance) ) %>%
   arrange(desc(Importance)) %>% 
   slice(1:20)
  
@@ -436,14 +440,18 @@ vi_monthly_mean <- vi_monthly %>%
   mutate(label= factor(label, unique(label)))
 
 #plot for the variable imporantance
-vi_plot <- ggplot(vi_monthly,  aes(x = Importance, y = reorder(label, sqrt(Importance), FUN = mean)))+
+vi_plot <- ggplot(vi_monthly, aes(x = Importance, y = reorder(label, sqrt(Importance), FUN = mean)))+
   stat_summary( aes(fill = type), color=NA, geom="bar", fun="mean", alpha=.8)+
   stat_summary(fun.data = mean_sd, geom = "linerange", size=1.5, alpha=.6)+
   scale_x_continuous(expand = c(0,0), trans = "sqrt")+
   scale_fill_manual(values=c("forestgreen", "dodgerblue3","brown3", "darkgoldenrod3", "gray60", "chocolate"), name="Category")+ #
   theme_classic()+
   labs(y="", fill="Category")+
-  theme(legend.position = c(.9,.15), axis.text.y =ggtext::element_markdown(), legend.title =element_text(face="bold") )
+  theme(legend.position = c(.9,.12), 
+        text = element_text(family = "Helvetica"),
+        axis.text.y =ggtext::element_markdown(family = "Helvetica", size= 10), 
+        legend.title =element_text(face="bold", size = 12),
+        legend.text = element_text(size= 11))
 
 ## Partial dependence of the variables in the model ----
 
@@ -459,7 +467,8 @@ yearly_model <- grimeDB_attr_trans %>%
   drop_na() %>% 
   predict_RF_grime()
 
-yearly_preds <- yearly_model[1] %>% as.data.frame()
+yearly_preds <- yearly_model[1] %>% 
+  as.data.frame()
 
 
 
@@ -474,16 +483,17 @@ explainer_rf <- explain_tidymodels(
   label = "random forest"
 )
 
-#get the partial dependences, it can take a while, like 1-2h
+
+#get the partial dependencies, it can take a while, like 1h
 pdp_rf <- model_profile(explainer_rf, N = NULL)
 
+#extract and rescale the most important variables, necessary for plotting later
 pdp_data_plot <- pdp_rf$agr_profiles %>% 
-  dplyr::select(Variable = `_vname_`, x=`_x_`, y_hat = `_yhat_`) %>%
+  dplyr::select(Variable = `_vname_`, x = `_x_`, y_hat = `_yhat_`) %>%
   right_join(vi_monthly_mean, by=c("Variable")) %>%
   mutate(label=fct_relevel(label, levels(vi_monthly_mean$label))) %>% 
   group_by(Variable) %>% 
-  mutate(x = (x - min(x, na.rm = T))/(max(x, na.rm = T) - min(x, na.rm = T))#,
-         #y_hat = (y_hat - min(y_hat, na.rm = T))/(max(y_hat, na.rm = T) - min(y_hat, na.rm = T))
+  mutate(x = (x - min(x, na.rm = T))/(max(x, na.rm = T) - min(x, na.rm = T))
          ) %>% 
   drop_na(y_hat) 
 
@@ -523,7 +533,7 @@ concs_forplot <- conc_df %>%
   filter(CH4mean >= 0.001) %>%
   mutate(Channel_type = case_when(Channel_type == "DD" ~ "**Downstream <br> of a dam**",
                                   Channel_type == "PS" ~ "**Downstream of<br>  a point source**",
-                                  Channel_type == "TH" ~ "**Thermogenically<br>  influenced**",
+                                  Channel_type %in% c("TH", "Th") ~ "**Thermogenically<br>  influenced**",
                                   Channel_type == "CAN" ~ "**Canals**",
                                   Channel_type == "DIT" ~ "**Ditches**",
                                   Channel_type == "PI" ~ "**Permafrost <br>  influenced**",
@@ -541,8 +551,9 @@ othersites_plot <-
   labs(y="", x= "CH<sub>4</sub> (mmol m^-3)")+
   theme_classic()+
   theme(legend.position = "none", 
+        text = element_text(family = "Helvetica"),
         axis.title.x = ggtext::element_markdown(),
-        axis.text.y = ggtext::element_markdown(),
+        axis.text.y = ggtext::element_markdown(size= 10),
         panel.background = element_rect(fill = "transparent"), # bg of the panel
         plot.background = element_rect(fill = "transparent", color = NA)) # bg of the plot
 
@@ -569,13 +580,13 @@ alldata_plot <-
 
 ### Make figure 2a: VI plot+ pdp plot
 vi_pdp_plot <- vi_plot + 
-  inset_element(pdp_plot, left = -.1, bottom = -.027, right = .43, top = 1)
+  inset_element(pdp_plot, left = - .1, bottom = - .027, right = .43, top = 1)
 
 #Make figure 2b: jitered mess with targeted sites
 plot_jittered <- alldata_plot + 
-  inset_element(othersites_plot, left = -.48, bottom = -.057, right = 1, top = 1)
+  inset_element(othersites_plot, left = -.53, bottom = - .057, right = 1, top = 1)
 
-#combine then amd label them
+#combine then and label them
 plots_combined <- vi_pdp_plot + 
   plot_jittered +
   plot_layout(ncol=2, tag_level = 'keep') + 
@@ -592,7 +603,8 @@ pdp_data_plot %>%
   facet_wrap( ~label, ncol = 3, scales = "free")+
   theme_classic()+
   labs(x = "", y = expression( hat(y) ))+
-  theme(strip.text =  ggtext::element_markdown() )
+  theme(strip.text =  ggtext::element_markdown(),
+        text = element_text(family = "Helvetica"))
 
 ggsave(filename = "figures/supplementary/PDP_individual.png", height = 9, width = 8, dpi = 800)
 
