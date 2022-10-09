@@ -19,13 +19,28 @@ lapply(package_list, require, character.only = TRUE)
 
 
 # Download required datasets form different sources:
-#1 Global River Methane Database (GRiMeDB) from doi: xxxx 
+#1 Global River Methane Database (GRiMeDB) from doi: https://doi.org/10.6073/pasta/b7d1fba4f9a3e365c9861ac3b58b4a90
 #2 GRADES river network with a wide array of predictors, and ancillary variables for upscaling from doi: xxxx
 #3 Optional: Output of this project to skip the processing and reproduce the figures, from doi: xxxx
 
 
-## Load the GRiMeDB ----
-load(file.path("data", "MethDB_tables_converted.rda"))
+## Pack GRiMeDB into a .rda file ----
+
+path_grime <- "/Users/gdro0001/Downloads/knb-lter-ntl.420.1" # Put the path wherever you have downloaded GRiMe
+
+sites_df <- read_csv(file.path(path_grime, "GRiMe_sites.csv"))
+papers_df <- read_csv(file.path(path_grime, "GRiMe_sources.csv"))
+conc_df <- read_csv(file.path(path_grime, "GRiMe_concentrations.csv"))
+flux_df <- read_csv(file.path(path_grime, "GRiMe_fluxes.csv"))
+
+
+
+
+save(papers_df, sites_df, conc_df, flux_df,
+     file = paste0("data/", "GRiMeDB.rda")) 
+
+#check it works
+load(file.path("data", "GRiMeDB.rda"))
 
 # fix NAs in channel type
 sites_df <- sites_df %>% 

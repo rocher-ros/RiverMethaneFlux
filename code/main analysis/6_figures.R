@@ -534,7 +534,7 @@ meth_avg <- meth_gis %>%
 
 
 ## Now get GRiMeDB 
-load(file.path("data", "MethDB_tables_converted.rda"))
+load(file.path("data", "GRiMeDB.rda"))
 
 sites_df <- sites_df %>% 
   mutate(Channel_type = ifelse(is.na(Channel_type) == TRUE, "normal", Channel_type)) 

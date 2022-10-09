@@ -525,7 +525,7 @@ pdp_plot <- pdp_data_plot %>%
 
 # To do figure 2b we need some extra data form methDB
 # combine with jitter plot of the sites targeted
-load(file.path("data", "MethDB_tables_converted.rda"))
+load(file.path("data", "GRiMeDB.rda"))
 
 #wrangle all the concentrations data and fix labels for channel types
 concs_forplot <- conc_df %>% 
