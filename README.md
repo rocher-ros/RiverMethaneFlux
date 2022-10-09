@@ -4,7 +4,7 @@ Project that quantifies CH4 emissions from rivers globally and monthly. This rep
 Main and corresponding author is Gerard Rocher-Ros (g.rocher.ros@gmail.com), which you can contact for questions.
 
 ## Setup
-Currently the datasets are private, so you need access to run the code in this repository. If you have access to the datasets, they should be placed in `data/processed` for the main analysis, if you want to run all the steps from scratch you will need to ask me for all the raw files as they are quite heavy. In the `data/` folder, there should also be the Global River Methane Database as a .rda file, currently in review in ESSD.
+Currently the datasets are private, so you need access to run the code in this repository. If you have access to the datasets, they should be placed in `data/processed` for the main analysis, if you want to run all the steps from scratch you will need to ask me for all the raw files as they are quite heavy. In the `data/` folder, there should also be the Global River Methane Database currently in review in ESSD and publicly available at [EDI](https://doi.org/10.6073/pasta/b7d1fba4f9a3e365c9861ac3b58b4a90).
 
 Code is in the `code/` folder, with two categories: 
 - Folder `preprocessing/` for all the GIS processing to obtain all spatial predictors for the GRADES River network. This analysis requires many large files and will be available by request.
