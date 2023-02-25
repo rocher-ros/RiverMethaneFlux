@@ -20,27 +20,32 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 # Now load all the packages
 lapply(package_list, require, character.only = TRUE)
 
+sf_use_s2(FALSE)
 
 # Load files ----
 
 #upscaled methane fluxes
 meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) %>% 
-  dplyr::select(-runoffFL, -contains("area"))
+  mutate(Fch4_mean = rowMeans(pick(ends_with("_ch4F")), na.rm = TRUE),
+         ch4_cv = rowMeans(pick(ends_with("ch4F_cv")), na.rm = TRUE) * 100,
+         Ech4_reach = rowMeans(pick(ends_with("reach")), na.rm = TRUE),
+         Ech4_extrap = rowMeans(pick(ends_with("extrap")), na.rm = TRUE),
+         dry_mean = rowMeans(pick(ends_with("dryout")), na.rm = TRUE)) %>% 
+  dplyr::select(-runoffFL, -contains("area"), -ends_with(c("dryout", "extrap")))
 
 #upscaled methane concentrations
 #mean estimates are "month_ch4", while SD are "month_ch4_sd"
 meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "ch4_preds_uncertainty", full.names = TRUE), read_csv) %>% 
   purrr::reduce(left_join, by = "COMID") %>% 
+  dplyr::select(COMID, ends_with("_mean")) %>% 
   rename_with( ~str_replace(.x, "mean", "ch4")) %>% 
-  rename_with( ~str_replace(.x, "sd", "ch4_sd")) %>% 
-  dplyr::select(COMID, paste0(month.abb, "_ch4"), paste0(month.abb, "_ch4_sd"))
+  dplyr::select(COMID, paste0(month.abb, "_ch4"))
 
 
 # load file with discharge and k data 
 hydro_k <- read_csv("data/processed/q_and_k.csv") %>% 
   dplyr::select(COMID, contains("k"), runoff_yr) %>% 
-  rowwise() %>% 
-  mutate( k_mean = mean(Jan_k:Dec_k, na.rm = TRUE)) %>% 
+  mutate( k_mean = rowMeans(pick(ends_with("_k")), na.rm = TRUE)) %>% 
   dplyr::select(COMID, k_mean, runoff_yr)
 
 #read coordinates from grades
@@ -52,6 +57,7 @@ extrap_areas <- read_csv("data/processed/interpolated_COMIDS.csv") %>%
   st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
   st_transform("+proj=eqearth +wktext") 
 
+
 #join it into one file 
 meth_gis <- meth_concs %>% 
   left_join( grades, by = "COMID") %>%
@@ -59,8 +65,12 @@ meth_gis <- meth_concs %>%
   left_join(hydro_k, by = "COMID") 
 
 #download world map
-world <-  ne_download(scale = 110, type = 'land', category = 'physical', 
-                      destdir = "data/processed/upscaling_extra_data/", returnclass = "sf") %>%
+
+#world <-  ne_download(scale = 110, type = 'land', category = 'physical', 
+#                      destdir = "data/processed/upscaling_extra_data/", returnclass = "sf") %>%
+#  st_transform("+proj=eqearth +wktext") 
+
+world <- read_sf("data/processed/upscaling_extra_data/ne_110m_land.shp") %>%
   st_transform("+proj=eqearth +wktext") 
 
 rm(grades, meth_concs, meth_fluxes)
@@ -75,14 +85,10 @@ gc()
   
 
 meth_avg <- meth_gis %>% 
-  drop_na(Jan_ch4F) %>% 
-  rowwise() %>% 
-  mutate( ch4_mean = mean(Jan_ch4:Dec_ch4, na.rm = TRUE),
-          Fch4_mean = mean(Jan_ch4F:Dec_ch4F, na.rm = TRUE),
-          ch4_cv = mean(Jan_ch4_sd:Dec_ch4_sd, na.rm = TRUE) / ch4_mean * 100,
-          Ech4_reach = sum(Jan_ch4E_reach:Dec_ch4E_reach, na.rm = TRUE),
-          Ech4_extrap = sum(Jan_ch4E_extrap:Dec_ch4E_extrap, na.rm = TRUE)) %>% 
-  dplyr::select(COMID:lon, ch4_mean, Fch4_mean, ch4_cv, Jan_ch4E_reach:Dec_ch4E_reach,
+  #drop_na(Jan_ch4F) %>% 
+  #rowwise() %>% 
+  mutate( ch4_mean = rowMeans(pick(ends_with("_ch4")), na.rm = TRUE)) %>% 
+  dplyr::select(COMID:lon, ch4_mean, Fch4_mean, dry_mean, ch4_cv, Jan_ch4E_reach:Dec_ch4E_reach,
                 Jan_ch4F:Dec_ch4F, Jan_iceCov:Dec_iceCov, k_mean, runoff = runoff_yr) %>%
   st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
   st_transform("+proj=eqearth +wktext") 
@@ -112,6 +118,7 @@ meth_hexes_avg <- meth_hexes %>%
   summarise(ch4_mean = mean(ch4_mean, na.rm = TRUE),
             Fch4_mean = mean(Fch4_mean, na.rm = TRUE),
             ch4_cv = mean(ch4_cv, na.rm = TRUE),
+            dry_mean = mean(dry_mean, na.rm = TRUE),
             Jan_ch4 = mean(Jan_ch4, na.rm = TRUE),
             Feb_ch4 = mean(Feb_ch4, na.rm = TRUE),
             Mar_ch4 = mean(Mar_ch4, na.rm = TRUE),

@@ -54,7 +54,7 @@ meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "
                      read_csv) %>% 
   purrr::reduce(left_join, by = "COMID") %>% 
   rename_with( ~str_replace(.x, "mean", "ch4")) %>% 
-  rename_with( ~str_replace(.x, "sd", "ch4_sd"))
+  rename_with( ~str_replace(.x, "se", "ch4_sd")) 
 
 gc()
 
@@ -796,7 +796,7 @@ total_fluxes <- df %>%
          Oct_ephemarea_m2 = Length*OctWidth*(1-Octtimedryout)*(1-Oct_iceCov) + Oct_totEphemArea_extrap/1e+6,  
          Nov_ephemarea_m2 = Length*NovWidth*(1-Novtimedryout)*(1-Nov_iceCov) + Nov_totEphemArea_extrap/1e+6,  
          Dec_ephemarea_m2 = Length*DecWidth*(1-Dectimedryout)*(1-Dec_iceCov) + Dec_totEphemArea_extrap/1e+6 ) %>% 
-  dplyr::select(COMID, runoffFL, Jan_ch4F:Dec_ch4E_sd_reach, Jan_ch4E_extrap:Dec_ephemarea_m2, Jan_iceCov:Dec_iceCov )
+  dplyr::select(COMID, runoffFL, Jan_ch4F:Dec_ch4E_sd_reach, Jan_ch4E_extrap:Dec_ephemarea_m2, Jan_iceCov:Dec_iceCov, Jantimedryout:Dectimedryout )
 
 names(total_fluxes)  
 
@@ -804,15 +804,9 @@ names(total_fluxes)
 total_fluxes %>% 
   select(COMID, ends_with(c("ch4E_extrap", "ch4E_reach"))) %>% 
   pivot_longer(-COMID, values_to = "flux", names_to = "type") %>% 
-  mutate(type = str_remove(type, month.abb)) %>% 
   summarise(total = sum(flux, na.rm = TRUE)/1e+12*16/12) #in TgCH4 / yr
 
 
-#sd propagated
-total_fluxes %>% 
-  select(COMID, ends_with(c("ch4E_sd_extrap", "ch4E_sd_reach"))) %>% 
-  pivot_longer(-COMID, values_to = "flux", names_to = "type") %>%
-  summarise(total =sum(flux, na.rm = TRUE)/1e+12*16/12) #in TgCH4 / yr
 
 
 ## Summary from the different methods :
@@ -827,9 +821,17 @@ total_fluxes %>%
 
 
 ## Export file ----
-total_fluxes %>% 
+
+#Some stuff got duplicated, fixing them
+dupes <- total_fluxes %>%   filter(duplicated(.[["COMID"]])) %>% pull(COMID) %>% unique()
+
+
+total_fluxes %>% filter(!COMID %in% dupes) %>% 
+  bind_rows(total_fluxes %>% 
+              filter(COMID %in% dupes) %>% 
+              summarise(across(everything(), first),.by = "COMID")) %>% 
   select(COMID:Dec_ch4F, Jan_ch4F_cv:Dec_ch4E_reach, Jan_ch4E_extrap:Dec_ch4E_extrap,
-         Jan_area_m2:Dec_ephemarea_m2, Jan_iceCov:Dec_iceCov ) %>% 
+         Jan_area_m2:Dec_ephemarea_m2, Jan_iceCov:Dec_iceCov, Jantimedryout:Dectimedryout ) %>% 
   write_csv( "data/processed/grades_ch4_fluxes.csv")
 
 

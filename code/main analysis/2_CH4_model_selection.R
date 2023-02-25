@@ -36,12 +36,12 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 # 3. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
 #    Thermogenically affected, Ditches
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
-  filter(`Aggregated?` == "No", distance_snapped < 10000,
+  filter(Aggregated == "No", distance_snapped < 10000,
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
   mutate( month = month(date)) %>% 
-  dplyr::select( COMID, Site_Nid, CH4mean, month, GPP_yr:month, 
-          -c(Channel_type, `Aggregated?`, date_end, date, area, T_ECE, S_ECE, slope,
-             temp_month, WaterTemp_actual, WaterTemp_est, discharge_measured)) 
+  dplyr::select( COMID, Site_ID, CH4mean, month, GPP_yr:month, 
+                 -c(Channel_type, Aggregated, date_end, date, area, T_ECE, S_ECE, slope,
+                    temp_month, WaterTemp_degC, WaterTemp_degC_estimated, discharge_measured)) 
 
 colnames(grimeDB_attributes)
 
@@ -57,7 +57,7 @@ vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 
                  "P_gnpp", "P_background", "P_load", "P_point", "P_surface_runoff_agri", "P_surface_runoff_nat", "N_retention_subgrid")
 
 # Select useful variables for the model, some variables were removed due to a high correlation with other ones 
-variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",  "S_PH_H2O",
+variables_to_remove <- c('Site_ID','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",  "S_PH_H2O",
                          'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY', "lon", "lat",  "S_TEB" ,
                          'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY", "T_CEC_SOIL",
                          "N_aquaculture", "N_gnpp", "N_load", "N_point",  "N_surface_runoff_agri", "N_surface_runoff_nat" )
@@ -66,8 +66,7 @@ variables_to_remove <- c('Site_Nid','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S
 #dataset with some variables log transformed
 grimeDB_attr_trans <- grimeDB_attributes %>%
   mutate(across(.cols = all_of(vars_to_log), ~log(.x + .1))) %>%  #log transform those variables, shift a bit from 0 as well
-  rename_with( ~ str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
-
+  rename_with( ~ str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variable
 
 #Do  some histograms with the log transformed variables
 # some variables are still very skewed, usually the anthropogenic predictors that have lots of 0s
@@ -156,7 +155,6 @@ grime_recipe <-  training(grime_split) %>%
 #prepare the testing df by passing on the recipe
 grime_prep <- prep(grime_recipe) 
 
-grime_prep$steps
 
 #prepare the training dataset
 grime_training <- juice(prep(grime_recipe))
@@ -164,8 +162,8 @@ grime_training <- juice(prep(grime_recipe))
 # we will tune the hyperparameters of the RF, so we prepare the model for that and put it in a workflow
 tune_spec <- rand_forest(
   mtry = tune(),
-  trees = 1000,
-  min_n = tune() ) %>%
+  trees = tune(),
+  min_n = tune()) %>%
   set_mode("regression") %>%
   set_engine("ranger")
 
@@ -175,7 +173,7 @@ tune_wf <- workflow() %>%
 
 #prepare the folds for the tuning
 set.seed(234)
-trees_folds <- vfold_cv(training(grime_split))
+trees_folds <- vfold_cv(training(grime_split), v = 5)
 
 
 # Now run a bunch of models in parallel with different combinations of parameters to find what works best
@@ -185,7 +183,8 @@ set.seed(345)
 tune_res <- tune_grid(
   tune_wf,
   resamples = trees_folds,
-  grid = 20
+  grid = 20,
+  control = tune::control_grid(verbose = TRUE)
 )
 
 tune_res
@@ -194,11 +193,11 @@ tune_res
 tune_res %>%
   collect_metrics() %>%
   filter(.metric == "rmse") %>%
-  select(mean, min_n, mtry) %>%
-  pivot_longer(min_n:mtry,
+  select(mean, min_n, mtry, trees) %>%
+  pivot_longer(min_n:trees,
                values_to = "value",
                names_to = "parameter") %>%
-  ggplot(aes(value, mean, color = parameter)) +
+  ggplot(aes(value, exp(mean), color = parameter)) +
   geom_point(show.legend = FALSE) +
   facet_wrap(~parameter, scales = "free_x") +
   labs(x = NULL, y = "rmse")
@@ -207,8 +206,9 @@ rm(tune_res)
 
 #Do a more targeted tuning with a new grid
 rf_grid <- grid_regular(
-  mtry(range = c(10,20)),
-  min_n(range = c(3, 8)),
+  mtry(range = c(5,30)),
+  min_n(range = c(3, 10)),
+  trees(range = c(1000,2000)),
   levels = 10
 )
 
@@ -218,26 +218,27 @@ set.seed(456)
 regular_res <- tune_grid(
   tune_wf,
   resamples = trees_folds,
-  grid = rf_grid
+  grid = rf_grid,
+  control = tune::control_grid(verbose = TRUE)
 )
 
 # Let's check the results
 regular_res %>%
-  collect_metrics() %>%
+  collect_metrics() %>% 
   filter(.metric == "rmse") %>%
-  select(mean, min_n, mtry) %>%
-  ggplot(aes(mean, min_n, color = mtry)) +
-  geom_point() +
-  geom_line(aes(group = mtry))+
-  scale_color_viridis_c()+
-  theme_bw()
+  select(mean, min_n, mtry, trees) %>%
+  pivot_longer(min_n:trees,
+               values_to = "value",
+               names_to = "parameter") %>%
+  ggplot(aes(value, exp(mean), color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "rmse")
 
 #select the best one and finish the model 
-best_auc <- select_best(regular_res, "rsq")
+select_best(regular_res, "rmse")
 
 # Best model has mtry = 8, trees = 1000, min_n = 6.
-#This workflow tuned only mtry and min_n, to do the trees you should re-run it changing the trees for min_n for example. 
-# I tried changing it both for min_n and mtry to double check it was not an issue, trees was not that critical as a parameter here
 best_auc
 
 
@@ -246,17 +247,26 @@ best_auc
 # ref: https://stackoverflow.com/questions/62687664/map-tidymodels-process-to-a-list-group-by-or-nest
 
 # Custom function to map it over month, with the parameters obtained from the tuning
+#prepare a dataset, nesting by month
+data_model_monthly <- grimeDB_attr_trans %>% 
+  select(-biome_label) %>% 
+  group_by(COMID, month) %>% 
+  summarise(across(everything(), mean)) %>%
+  ungroup() %>% 
+  dplyr::select(-all_of(variables_to_remove)) %>% 
+  drop_na()
+
 # First setup of the RF model
 
 n.cores= parallel::detectCores()-1
 
 rf_mod <-
   rand_forest(
-    mtry = 16,
-    trees = 1000,
-    min_n = 5 ) %>%
+    mtry = 13, #tuned 13
+    trees = 1200, #def 1200
+    min_n = 8 ) %>% #tuned 8
   set_mode("regression") %>%
-  set_engine("ranger", importance="permutation", num.threads = n.cores)
+  set_engine("ranger", importance="impurity", num.threads = n.cores, keep.inbag=TRUE)
 
 # prepare a workflow with it to feed into the function
 wf <-
@@ -269,13 +279,13 @@ predict_RF_grime <- function(df) {
   
   df <- df %>% dplyr::select(-month)
   
-  split <- initial_split(df)
+  split <- initial_split(df, prop = .8)
   train_df <- training(split)
   test_df <- testing(split)
  
   #create recipe
   recipe_train <- train_df %>% 
-    recipe(Log_CH4mean ~.) %>% 
+    recipe(Log_CH4mean ~ .) %>% 
     step_center(all_predictors(), -all_outcomes()) %>%
     step_scale(all_predictors(), -all_outcomes()) 
 
@@ -286,26 +296,23 @@ predict_RF_grime <- function(df) {
     fit(data = train_df) 
   
   #predict on test data
- preds <- predict(fit_wf, test_df) %>% 
-   bind_cols(test_df)
+  preds_mod <- predict(fit_wf$fit$fit$fit, 
+                       extract_recipe(fit_wf) %>% bake(test_df),
+                       type = "se",
+                       se.method = "infjack") 
+  
 
-return(list(preds, fit_wf, train_df))
+  preds <- tibble(.pred = preds_mod$predictions,
+                  se = preds_mod$se)  %>% 
+    bind_cols(test_df)
+  
+  
+  return(list(preds, fit_wf, train_df))
 
 }
 
 ## Run the model via map for each month ----
-
-#prepare a dataset, nesting by month
-data_model_monthly <- grimeDB_attr_trans %>% 
-  select(-biome_label) %>% 
-  group_by(COMID, month) %>% 
-  summarise(across(everything(), mean)) %>%
-  ungroup() %>% 
-  dplyr::select(-all_of(variables_to_remove)) %>% 
-  drop_na()
-
-
-set.seed(123)
+set.seed(12345)
 
 
 # Now finally run the model for each month, using data of adjacent months for each month
@@ -332,14 +339,15 @@ monthly_models <- lst(
   mutate( model_out = map(data, possibly(predict_RF_grime, otherwise = NA))) %>% 
   rowwise() %>%
   mutate( preds = model_out[1],
-          model_fit = model_out[2]) %>% 
+          model_fit = model_out[2],
+          train = model_out[3]) %>% 
   dplyr::select(-data, -model_out)
 
 ## Plot model performance ----
 # first we do nicer labels for the months
 labelled_months <- tibble(month_label = tolower(month.abb), labels = month.name)
 
-#extract the model predicition data for plotting model performance
+#extract the model prediction data for plotting model performance
 monthly_models_unnested <- monthly_models %>% 
   mutate(month_label = fct_relevel(month_label, levels = toupper(month.abb))) %>% 
   unnest(preds)  %>% 
@@ -365,7 +373,7 @@ ggplot(monthly_models_unnested, aes(exp(.pred), exp(Log_CH4mean)))+
   scale_x_log10(labels=scales::number, limits=c(0.1, 200))+
   facet_wrap(~labels, ncol = 3)+
   theme_bw()+
-  theme(text = element_text(family = "Helvetica"),
+  theme(#text = element_text(family = "Helvetica"),
         axis.title.y = ggtext::element_markdown(),
         axis.title.x = ggtext::element_markdown(),
         strip.background = element_rect(fill="white"),
@@ -378,7 +386,6 @@ ggsave(filename= "figures/supplementary/model_perf_monthly.png", width = 9, heig
 ggplot(monthly_models_unnested, aes(.pred, Log_CH4mean - .pred))+
   geom_point(alpha = .6)+
   geom_hline(yintercept = 0, linetype = 1)+
-  geom_smooth( se = FALSE, linetype = 2, color = "red")+
   labs(x = "**CH<sub>4</sub> predictions**<br>log(mmol m<sup>-3</sup>)", 
        y = "**Residuals** <br>log(mmol m<sup>-3</sup>)")+
   facet_wrap(~labels, ncol = 3)+
@@ -403,6 +410,26 @@ ggplot(monthly_models_unnested, aes( x=Log_CH4mean-.pred))+
         axis.title.x = ggtext::element_markdown(),
         strip.background = element_rect(fill="white"),
         strip.text = element_text(size=12))
+
+
+# Empirical coverage of confidence intervals from the quantile regression
+emp_coverage <- monthly_models_unnested %>%
+  group_by(month_label) %>% 
+  mutate(cover_50 = ifelse(Log_CH4mean >= q.25 & Log_CH4mean <= q.75, 1, 0),
+         cover_75 = ifelse(Log_CH4mean >= q.125 & Log_CH4mean <= q.875, 1, 0),
+         cover_95 = ifelse(Log_CH4mean >= q.05 & Log_CH4mean <= q.95, 1, 0)) %>% 
+  summarise(covered_50_prop = sum(cover_50) / n(),
+            covered_75_prop = sum(cover_75) / n(),
+            covered_95_prop = sum(cover_95) / n())
+
+
+emp_coverage
+
+
+monthly_models_unnested %>%
+  group_by(month_label) %>% 
+  mutate(cover_sd = ifelse(Log_CH4mean >= (.pred - sqrt(se)*1.96) & Log_CH4mean <= (.pred + sqrt(se)*1.96) , 1, 0))  %>% 
+  summarise( covered_sd_prop = sum(cover_sd) / n())
 
 ## Assess variable importance ----
 #variable importance. make a simple function to map through the df
@@ -521,15 +548,13 @@ pdp_plot <- pdp_data_plot %>%
 
 
 
-#ggsave("figures/rf_figure.png",  height = 7, width = 6, dpi=500)
-
 # To do figure 2b we need some extra data form methDB
 # combine with jitter plot of the sites targeted
 load(file.path("data", "GRiMeDB.rda"))
 
 #wrangle all the concentrations data and fix labels for channel types
 concs_forplot <- conc_df %>% 
-  left_join( sites_df, by="Site_Nid") %>% 
+  left_join( sites_df, by="Site_ID") %>% 
   filter(CH4mean >= 0.001) %>%
   mutate(Channel_type = case_when(Channel_type == "DD" ~ "**Downstream <br> of a dam**",
                                   Channel_type == "PS" ~ "**Downstream of<br>  a point source**",
@@ -800,6 +825,5 @@ extrap_monthly <- jan_extrap %>%
   
 #export the data  
 write_csv(extrap_monthly, "data/processed/interpolated_COMIDS.csv")
-
 
 

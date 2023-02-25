@@ -48,21 +48,21 @@ sites_df <- sites_df %>%
 
 #read the GRADES id (COMID) that belongs to each site in GRiMeDB
 grime_comids <- read_csv("data/processed/sites_meth_comid.csv") %>% 
-  mutate(Site_Nid= as.character(Site_Nid))
+  rename(Site_ID= Site_Nid)
 
 
 sites_clean <- sites_df %>% 
-  left_join(grime_comids, by="Site_Nid") %>% 
+  left_join(grime_comids, by="Site_ID") %>% 
   drop_na(COMID)
 
 
 
 ## attach the COMID to the concentration df and keep useful variables. we also fix NAs from CH4mean to close to equilibrium
 conc_df_comids <- conc_df %>% 
-  filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
-  left_join(sites_clean, by="Site_Nid") %>% 
-  dplyr::select(Site_Nid, `Aggregated?`, Channel_type, COMID, distance_snapped, CH4mean, CO2mean,
-                date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  ) %>% 
+  filter(Site_ID %in% sites_clean$Site_ID) %>% 
+  left_join(sites_clean, by="Site_ID") %>% 
+  dplyr::select(Site_ID, Aggregated, Channel_type, COMID, distance_snapped, CH4mean, CO2mean,
+                date= Date_start, date_end= Date_end, discharge_measured= Q, WaterTemp_degC, WaterTemp_degC_estimated  ) %>% 
   mutate(CH4mean =ifelse(CH4mean < 0.0001, 0.0001, CH4mean)) %>% 
   drop_na(CH4mean)
 
@@ -227,7 +227,7 @@ grimeDB_attributes_mon <- grimeDB_attributes %>%
   dplyr::select(!ends_with(c("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")))
 
 # quickly check one site
-grimeDB_attributes_mon %>% filter(Site_Nid == "2597") %>% 
+grimeDB_attributes_mon %>% filter(Site_ID == "2597") %>% 
   ggplot(aes(date, gw_month))+
   geom_point()
 

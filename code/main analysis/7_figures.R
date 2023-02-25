@@ -7,7 +7,7 @@
 
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'googledrive' , 'sf',  'ggpubr', 'rnaturalearth', 'ggtext', 'lubridate', 'patchwork', 'see', 'broom', 'readxl')
+package_list <- c('tidyverse', 'sf',  'ggpubr', 'rnaturalearth', 'ggtext', 'lubridate', 'patchwork', 'see', 'broom', 'readxl')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -51,10 +51,10 @@ grades <- read_csv("data/processed/grades_coords.csv")
 
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
   drop_na(lat) %>% 
-  filter(`Aggregated?` == "No",
+  filter(Aggregated == "No",
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
   mutate( month = month.name[month(date)]) %>%
-  dplyr::select(COMID, Site_Nid, lat, lon, month) %>% 
+  dplyr::select(COMID, Site_ID, lat, lon, month) %>% 
   group_by(COMID, month) %>% 
   summarise(lat= mean(lat),
             lon = mean(lon)) %>% 
@@ -79,10 +79,10 @@ lakes <- ne_download(scale = 50, type = 'lakes', category = 'physical', returncl
 buffers <- meth_hexes_avg %>% 
   mutate( 
     buffer_change = case_when(
-      runoff < .005 ~ -40000,
-      runoff >= .005 & runoff < .02 ~ -30000,
-      runoff >= .02 & runoff < .04 ~ -20000,
-      runoff >= .04 & runoff < .06 ~ -12000,
+      runoff < .005 ~ -45000,
+      runoff >= .005 & runoff < .02 ~ -35000,
+      runoff >= .02 & runoff < .04 ~ -25000,
+      runoff >= .04 & runoff < .06 ~ -15000,
       runoff >= .06 & runoff < .1 ~ -8000,
       runoff >= .1 & runoff < .5 ~ -6000,
       runoff >= .5 & runoff < 1 ~ -3000,
@@ -126,7 +126,7 @@ map_fch4 <-
   ggplot()+
   geom_sf(
     data = st_buffer(meth_hexes_avg, dist = buffers$buffer_change), 
-    aes(fill = Fch4_mean*16/12), color = NA )+
+    aes(fill = Fch4_mean*16/12), color = NA)+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
@@ -237,7 +237,7 @@ ggsave(map_monthly,
 
 
 
-  ## Map of extrapolated areas monthly, with sampled sites ----
+## Map of extrapolated areas monthly, with sampled sites ----
 #prepare the file, pivot longer for facet_wrap and fix month labels
 extrap_pols_monthly <- extrap_pols %>% 
   st_drop_geometry() %>% 
@@ -540,20 +540,20 @@ sites_df <- sites_df %>%
   mutate(Channel_type = ifelse(is.na(Channel_type) == TRUE, "normal", Channel_type)) 
 
 grime_comids <- read_csv("data/processed/sites_meth_comid.csv") %>% 
-  mutate(Site_Nid= as.character(Site_Nid))
+  mutate(Site_ID= Site_Nid)
 
 
 # join the flux with concentration and the site dataset, 
 boltzmann_k <- 8.62e-5
 
 flux_sites <- flux_df %>% 
-  left_join( conc_df, by=c("Site_Nid", "Date_start")) %>% 
-  left_join( sites_df, by="Site_Nid") %>% 
-  filter(`Aggregated?` == "No", WaterTemp_actual < 100, 
+  left_join( conc_df, by=c("Site_ID", "Date_start")) %>% 
+  left_join( sites_df, by="Site_ID") %>% 
+  filter(Aggregated == "No", WaterTemp_degC < 100, 
          !Channel_type %in% c("DD","GT", "PS", "TH","Th", "CAN")) %>%
-  mutate(WaterTemp_best = ifelse(is.na(WaterTemp_actual) == TRUE, WaterTemp_est, WaterTemp_actual) ) %>% 
+  mutate(WaterTemp_best = ifelse(is.na(WaterTemp_degC) == TRUE, WaterTemp_degC_estimated, WaterTemp_degC) ) %>% 
   drop_na(Diffusive_CH4_Flux_Mean, WaterTemp_best ) %>% 
-  mutate(site_lat = paste("Site:",Site_Nid,"\nLat: " , round(Latitude,1), sep=""),
+  mutate(site_lat = paste("Site:",Site_ID,"\nLat: " , round(Latitude,1), sep=""),
          temp_inv = 1/(boltzmann_k*(WaterTemp_best + 273.15)),
          temp_stand = 1/(boltzmann_k*288.15) - 1/(boltzmann_k*(WaterTemp_best + 273.15))) 
 
@@ -562,47 +562,47 @@ flux_sites$site_lat <- reorder(flux_sites$site_lat, desc(flux_sites$Latitude))
 
 # Process all files ----
 sites_clean <- sites_df %>% 
-  left_join(grime_comids, by="Site_Nid") %>% 
+  left_join(grime_comids, by="Site_ID") %>% 
   drop_na(COMID)
 
 
 
 ## attach the COMID to the concentration df and keep useful variables 
 conc_df_comids <- conc_df %>% 
-  filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
-  left_join(sites_clean, by="Site_Nid") %>% 
-  dplyr::select(Site_Nid, Publication_Nid = Publication_Nid.x , `Aggregated?`, Channel_type, COMID,
+  filter(Site_ID %in% sites_clean$Site_ID) %>% 
+  left_join(sites_clean, by="Site_ID") %>% 
+  dplyr::select(Site_ID, Source_ID = Source_ID.x , Aggregated, Channel_type, COMID,
                 Latitude, distance_snapped, CH4mean, CO2mean,
-                date= Date_start, discharge_measured= Q, WaterTemp_actual, WaterTemp_est  ) %>% 
+                date= Date_start, discharge_measured= Q, WaterTemp_degC, WaterTemp_degC_estimated  ) %>% 
   mutate(CH4mean =ifelse(CH4mean < 0, 0.0001, CH4mean)) %>% 
   drop_na(CH4mean)
 
 #Look at sites with highest concentrations
 conc_df_comids %>% 
-  group_by(Site_Nid) %>% 
+  group_by(Site_ID) %>% 
   summarise(CH4mean= median(CH4mean),
             Latitude = first(Latitude),
-            Site_Nid = first(Site_Nid),
+            Site_ID = first(Site_ID),
             COMID = first(COMID)) %>% 
   arrange(desc(CH4mean)) %>% 
-  dplyr::select(CH4mean, Latitude, Site_Nid, COMID) %>% 
+  dplyr::select(CH4mean, Latitude, Site_ID, COMID) %>% 
   print(n=30)
 
 
 #get the flux df and fix some issues, also merge with conc_Df
 flux_comid <-  flux_df %>% 
   mutate(Diffusive_CH4_Flux_Mean =ifelse(Diffusive_CH4_Flux_Mean < 0, 0, Diffusive_CH4_Flux_Mean)) %>% 
-  filter(Site_Nid %in% sites_clean$Site_Nid) %>% 
-  left_join(sites_clean, by="Site_Nid") %>% 
-  left_join(conc_df, by=c("Site_Nid", "Date_start")) %>% 
-  mutate(WaterTemp_best = if_else(is.na(WaterTemp_actual) == FALSE,WaterTemp_actual, WaterTemp_est ),
-         k_method= str_replace(k_method, "additon", "addition"),
-         k_method = str_replace(k_method, "Physical" ,"physical")) 
+  filter(Site_ID %in% sites_clean$Site_ID) %>% 
+  left_join(sites_clean, by="Site_ID") %>% 
+  left_join(conc_df, by=c("Site_ID", "Date_start")) %>% 
+  mutate(WaterTemp_best = if_else(is.na(WaterTemp_degC) == FALSE,WaterTemp_degC, WaterTemp_degC_estimated ),
+         k_Method= str_replace(k_Method, "additon", "addition"),
+         k_Method = str_replace(k_Method, "Physical" ,"physical")) 
 
 #now join the observed fluxes and predicted into one df. I will filter the sites that are not well snapped (>100m)
 flux_comp <- flux_comid %>% 
-  dplyr::select(COMID, Site_Nid, date= Date_start, distance_snapped, CH4mean, WaterTemp_best, elev=Elevation_m, CO2mean,
-         Diffusive_CH4_Flux_Mean, Diff_Method, k_method ) %>% 
+  dplyr::select(COMID, Site_ID, date= Date_start, distance_snapped, CH4mean, WaterTemp_best, elev=Elevation_m, CO2mean,
+         Diffusive_CH4_Flux_Mean, Diff_Method, k_Method ) %>% 
   filter(distance_snapped < 500) %>% 
   left_join( meth_gis, by="COMID") %>%  
   left_join(hydro_k, by = "COMID") %>% 
@@ -647,22 +647,18 @@ flux_comp <- flux_comid %>%
             k600_obs = median(k600_obs),
             flux_pred = median(flux_pred) ,
             flux_obs = median(Diffusive_CH4_Flux_Mean),
-            k_method = first(k_method)) %>% 
-  filter( !k_method %in% c("not determined", "other"),
+            k_Method = first(k_Method)) %>% 
+  filter( !k_Method %in% c("not determined", "other"),
           flux_pred > 0, flux_obs > 0)
 
-flux_comp %>% group_by(k_method) %>% summarise(n=n())
+flux_comp %>% group_by(k_Method) %>% summarise(n=n())
 
 plot_overall <- ggplot(data= flux_comp,
        aes(flux_obs, flux_pred))+
   geom_point( color="black", size=2)+
-  #geom_point(data = flux_comp %>% 
-  #         filter( k600_pred/k600_obs > .5 &  k600_pred/k600_obs < 1.5),
-  #       aes(flux_obs, flux_pred), color= "red")+
   geom_abline(slope=1, intercept = 0, linetype=2)+
   geom_smooth(method="lm", se= FALSE, color= "red", linetype = 2)+
   stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))+
- # stat_regline_equation(label.y.npc = .9)+
   scale_x_log10(labels=scales::number, limits = c(0.0001, 1000))+
   scale_y_log10(labels=scales::number, limits = c(0.0001, 1000))+
   labs(x="Measured CH<sub>4</sub> diffusive emissions", y="Modelled CH<sub>4</sub> diffusive emissions", title = "All data")+
@@ -672,12 +668,11 @@ plot_overall <- ggplot(data= flux_comp,
         axis.title.y = ggtext::element_markdown())
 
 plot_zoomed <- ggplot(data= flux_comp %>% 
-         filter( !k_method %in% c("not determined", "other"),
-                #distance_snapped < 50,
+         filter( !k_Method %in% c("not determined", "other"),
                   k600_pred/k600_obs > .5 &  k600_pred/k600_obs < 1.5, 
                 flux_pred > 0, flux_obs > 0),
          aes(flux_obs, flux_pred))+
-    geom_point(data=flux_comp %>% filter( !k_method %in% c("not determined", "other"),
+    geom_point(data=flux_comp %>% filter( !k_Method %in% c("not determined", "other"),
                                           flux_pred > 0, flux_obs > 0, is.na(k600_obs) == FALSE, k600_pred/k600_obs < 100),
                aes(flux_obs, flux_pred, color = (k600_pred/k600_obs)*100), alpha=.5, size=2)+
   geom_point( color="black", size=2)+
@@ -717,11 +712,11 @@ plot_sites <-
   geom_point( size = 2, alpha = .2)+
   geom_smooth(data= flux_sites %>% 
                 filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
-                add_count(Site_Nid) %>% 
+                add_count(Site_ID) %>% 
                 filter(n > 20) %>% 
                 arrange(abs(Latitude)),  
               method= "lm", se= FALSE, size = .8,
-              aes(temp_stand, Diffusive_CH4_Flux_Mean, group = Site_Nid), alpha=.6)+
+              aes(temp_stand, Diffusive_CH4_Flux_Mean, group = Site_ID), alpha=.6)+
   geom_smooth(method= "lm", color="gray20", se= FALSE, size = 1)+
   geom_abline(slope=.96, intercept = -.39, linetype = 2)+
   annotate("text", x=2.8, y = 360, label="m = 0.96", angle = 33)+
@@ -750,12 +745,13 @@ yvon_durocher2014 <- read_excel("~/Desktop/yvon-durocher2014.xlsx") %>%
 
 #reformot our data and put together withthe other aquatic systems
 data_for_Em <- flux_sites  %>% 
-  filter(Diffusive_CH4_Flux_Mean > 0, WaterTemp_actual > -30) %>% 
-  add_count(Site_Nid) %>% 
-  filter(n > 5) %>% 
-  mutate(ecosystem.type = "Rivers") %>% 
-  dplyr::select(site = Site_Nid, latitude = Latitude, longitude = Longitude, ecosystem.type, 
-                temp_c = WaterTemp_actual, flux_mmol.m2 = Diffusive_CH4_Flux_Mean) %>% 
+  filter(Diffusive_CH4_Flux_Mean > 0, WaterTemp_degC > -30) %>% 
+  add_count(Site_ID) %>% 
+  filter(n > 10) %>% 
+  mutate(ecosystem.type = "Rivers",
+         site = as.character(Site_ID)) %>% 
+  dplyr::select(site, latitude = Latitude, longitude = Longitude, ecosystem.type, 
+                temp_c = WaterTemp_degC, flux_mmol.m2 = Diffusive_CH4_Flux_Mean) %>% 
   bind_rows(yvon_durocher2014) %>% 
   mutate(temp_inv = 1/(boltzmann_k*(temp_c + 273.15)))
   
@@ -768,21 +764,6 @@ Em_all <- data_for_Em %>%
   left_join(data_for_Em %>% 
               group_by(site) %>% 
               summarise(across(c(ecosystem.type, latitude, longitude), first))) 
-
-library(lme4)
-Em_all <- data_for_Em %>% 
-  group_by(site) %>% 
-  do(fit = lm(log(flux_mmol.m2) ~ temp_inv, data = .)) %>% 
-  summarize(site = first(site),
-            tidy(fit)) 
-
-lme_out <- lmer(log(flux_mmol.m2) ~ temp_inv + (1 + temp_inv|site), data = data_for_Em)
-
-plot(lme_out)
-qqnorm(resid(lme_out))
-qqline(resid(lme_out))
-
-dat_together <- data_for_Em %>% left_join(coef(lme_out))
 
 
 # do the density plot of Em across systems
@@ -887,8 +868,10 @@ ggsave("figures/supplementary/ebullition_temp.png", ebullition_temp,  scale = .7
 ## Temperature dependence of ebullition and across river size ----
 flux_sites %>% 
   filter(Diffusive_CH4_Flux_Mean > 0.001) %>% 
-  drop_na(System_size) %>% 
-  mutate(System_size = fct_relevel(System_size, "large", after = Inf)) %>% 
+  left_join(grime_comids %>% select(Site_ID, order)) %>%
+  drop_na(order) %>% 
+  #drop_na(System_size) %>% 
+ # mutate(System_size = fct_relevel(System_size, "large", after = Inf)) %>% 
   ggplot(aes(temp_stand, Diffusive_CH4_Flux_Mean))+
   geom_point(aes( color=abs(Latitude)),  size = 2, alpha = .6)+
   geom_smooth(method= "lm", color="gray20", se= FALSE, size = 1)+
@@ -905,7 +888,7 @@ flux_sites %>%
   theme_classic()+
   theme(axis.title.y = ggtext::element_markdown(), legend.position = "right",
         strip.text = element_text(size=14, face= "bold"))+
-  facet_wrap(~System_size)
+  facet_wrap(~order)
 
 ggsave("figures/supplementary/river_size_temp.png", width = 12, scale = .7)
 
@@ -918,9 +901,9 @@ reg_compl_plot <-
   flux_comid %>% 
   filter(Eb_CH4_Flux_Mean > 0.00001,
          Diffusive_CH4_Flux_Mean > 0.0001) %>% 
-  filter(k_method %in% c("chamber + conc", "tracer addition")) %>% 
+  filter(k_Method %in% c("chamber+conc", "tracer addition")) %>% 
   ggplot(aes(Diffusive_CH4_Flux_Mean, Eb_CH4_Flux_Mean ))+
-  geom_point( aes( color=Site_Nid), size = 2, alpha=.7)+
+  geom_point( aes( color=as.character(Site_ID)), size = 2, alpha=.7)+
   geom_smooth( method="lm",  color="black", size=1)+
   geom_abline(intercept = 0, slope = 1, linetype=2)+
   stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), label.y.npc = .99)+
@@ -941,7 +924,7 @@ density_comp_plot <-
   flux_comid %>% 
   filter(Eb_CH4_Flux_Mean > 0.0001,
          Diffusive_CH4_Flux_Mean > 0.0001) %>% 
-  filter(k_method %in% c("chamber + conc", "tracer addition")) %>% 
+  filter(k_Method %in% c("chamber+conc", "tracer addition")) %>% 
   pivot_longer(c(Eb_CH4_Flux_Mean, Diffusive_CH4_Flux_Mean ), names_to = "type", values_to = "flux") %>% 
   mutate(type= case_when(type == "Eb_CH4_Flux_Mean" ~ "Ebullition",
                          type == "Diffusive_CH4_Flux_Mean" ~ "Diffusion" )) %>% 
@@ -1066,7 +1049,7 @@ flux_sites %>%
             tidy(fit))  %>% 
   arrange(desc(Latitude_label)) %>% 
   filter(term == "temp_inv") %>% 
-  ggplot(aes( x = Latitude_label, y= -estimate,))+
+  ggplot(aes( x = Latitude_label, y= -estimate))+
   geom_col()+
   coord_flip()
 
@@ -1095,3 +1078,192 @@ flux_sites %>%
 
             
 
+
+## checking within reach variability
+
+
+
+data_methane_used <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
+  filter(Aggregated == "No", distance_snapped < 1000,
+         !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>% 
+  mutate(month = month(date,label = TRUE, abbr = TRUE ),
+         label =paste0(COMID, "\n (", round(lat,1), "; ", round(lon,1), ")"))
+
+data_methane_used %>% 
+  filter(CH4mean > 0.001) %>% 
+  add_count(COMID) %>% 
+  filter(n>100) %>% 
+  mutate(label= as_factor(label) %>% fct_reorder(CH4mean, .fun = mean, .desc= TRUE)) %>% 
+  ggplot(aes( label, CH4mean, color= month))+
+  geom_jitter(alpha=.2, position = position_dodge(width = .75))+
+ # stat_summary(geom = "pointrange", fun.data= "mean_sd", size= 1, color= "black")+
+  stat_summary(geom= "pointrange", fun.data= "mean_sd", position = position_dodge(width = .75),
+               color= "black", shape = 21, size= .75, aes(fill = month))+
+  scale_color_social_d(name = "")+
+  scale_fill_social_d(name = "")+
+  scale_y_log10(labels=scales::number)+
+  labs(x= "COMID \n (lat; lon)", y= expression(CH[4]~(mmol~~m^-3)))+
+  theme_classic()+
+  theme(legend.position = "top")+
+  guides(color = guide_legend(nrow = 1))
+
+ggsave("figures/supplementary/sites_with_many_obs2.png")
+
+ 
+
+## figures review
+
+conc_sites_df <- grime_comids %>% 
+  left_join(sites_df) %>% 
+  mutate(lat_classes = case_when(abs(lat) >= 60 ~ "High latitude",
+                                 abs(lat) > 25 & abs(lat) < 60 ~ "Mid latitude",
+                                 abs(lat) < 25 ~ "Low latitude") %>% 
+           fct_relevel("Low latitude", after = 3)) %>% 
+  left_join(conc_df %>%  filter(CH4mean > 0.001) %>% summarise(ch4mean = mean(CH4mean), .by = Site_ID))
+
+names(conc_sites_df)
+
+plot_dist <- conc_sites_df %>% 
+  group_by(order, lat_classes) %>% 
+  summarise(n= n()) %>% 
+  ungroup() %>% 
+  group_by(lat_classes) %>% 
+  mutate(frac_order = n/sum(n)*100) %>% 
+ggplot(aes(order,frac_order, fill= lat_classes))+
+  geom_col( position = "dodge")+
+  scale_x_continuous(breaks= 1:9)+
+  scale_y_continuous(name = "Relative distribution (%)", expand = c(0,0))+
+  scale_fill_brewer(type= "qual", palette = 3, name = "")+
+  theme_bw()+
+  theme(legend.position = "top")
+
+plot_concs <- conc_sites_df %>% 
+  ggplot(aes(as.character(order), ch4mean))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter(alpha=.1)+
+  scale_y_log10()+
+  facet_wrap(~lat_classes, ncol = 1)+
+  theme_bw()+
+  labs(x= "Order", y = "CH4 concentration (mmol/L)")
+
+plot_dist / plot_concs
+
+
+#temperature dependence across orders
+#reformot our data and put together withthe other aquatic systems
+data_for_Em <- flux_sites  %>% 
+  left_join(grime_comids %>% select(Site_ID, order)) %>%
+  drop_na(order) %>% 
+  filter(Diffusive_CH4_Flux_Mean > 0, WaterTemp_degC > -30) %>% 
+  add_count(Site_ID) %>% 
+  filter(n > 10) %>% 
+  mutate(ecosystem.type = "Rivers",
+         site = as.character(Site_ID)) %>% 
+  dplyr::select(site, latitude = Latitude, longitude = Longitude, ecosystem.type, order, Elevation_m,
+                temp_c = WaterTemp_degC, flux_mmol.m2 = Diffusive_CH4_Flux_Mean) %>% 
+  bind_rows(yvon_durocher2014) %>% 
+  mutate(temp_inv = 1/(boltzmann_k*(temp_c + 273.15)))
+
+temp_dep_size_lat <- data_for_Em %>% 
+  group_by(site) %>% 
+  do(fit = lm(log(flux_mmol.m2) ~ temp_inv, data = .)) %>% 
+  summarize(site = first(site),
+            tidy(fit))  %>% 
+  left_join(data_for_Em %>% 
+              group_by(site) %>% 
+              summarise(across(c(ecosystem.type, latitude, longitude, order, Elevation_m), first))) 
+
+temp_dep_size_lat %>% 
+  filter(term == "temp_inv", ecosystem.type == "Rivers") %>% 
+  ggplot(aes(as.character(order), estimate))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_hline(yintercept = 0)+
+  geom_jitter(alpha=.4)+
+  labs(y= "Apparent activation energy (eV)", x = "Order")+
+  theme_bw() +
+
+temp_dep_size_lat %>% 
+  filter(term == "temp_inv", ecosystem.type == "Rivers", Elevation_m < 1000) %>% 
+  ggplot(aes(Elevation_m, estimate))+
+  geom_point()+
+  labs(y= "Apparent activation energy (eV)", x = "Elevation (m)")+
+  theme_bw()
+
+
+#### uncertainity
+vals_all <- read_csv("figures/supplementary/uncertaintiy_mc.csv") 
+
+
+
+vals_all %>% filter(type == "normal" ) %>% 
+  ggplot(aes(flux))+
+  geom_histogram(bins= 60)+
+  theme_bw()+
+  labs(x= "Flux estimate (Pg CH4 yr-1)", y= "")
+
+bg_estimate <- vals_all %>% 
+  filter(type == "normal" ) %>% 
+  summarise(q.025 = quantile(flux, 0.025),
+            q.125 = quantile(flux, 0.125),
+            q.25 = quantile(flux, 0.25),
+            q.5 = quantile(flux, 0.5),
+            q.75 = quantile(flux, 0.75),
+            q.875 = quantile(flux, 0.875),
+            q.975 = quantile(flux, 0.975)) 
+
+lm_ebulltion <- flux_comid %>% 
+  filter(Eb_CH4_Flux_Mean > 0.00001,
+         Diffusive_CH4_Flux_Mean > 0.0001) %>% 
+  filter(k_Method %in% c("chamber+conc", "tracer addition")) %>% 
+  mutate(diff_log = log(Diffusive_CH4_Flux_Mean),
+         eb_log = log(Eb_CH4_Flux_Mean), .keep = "none") %>% 
+  lm(eb_log~diff_log, data = .)
+
+
+vals_estimate <- data.frame(vals = c("lower", "mid", "upper"),
+                            diff_log = c(bg_estimate$q.025, bg_estimate$q.5, bg_estimate$q.975))
+ 
+eb_preds <-  predict(lm_ebulltion, vals_estimate, interval = "predict")
+
+eb_preds
+
+vals_all %>% 
+  mutate(type = fct_recode(type, "**CH<sub>4</sub>**" = "ch4","**River <br>area**" = "area", "**Gas <br>transfer<br> velocity**" = "k"),
+         change = fct_recode(change, "+1 SD" = "plus_1SD", "-1 SD" = "minus_1SD")) %>% 
+  filter(!type == "normal") %>% 
+  group_by(type, change) %>% 
+  summarise( q.025 = quantile(flux, 0.025),
+             q.125 = quantile(flux, 0.125),
+             q.25 = quantile(flux, 0.25),
+             q.5 = quantile(flux, 0.5),
+             q.75 = quantile(flux, 0.75),
+             q.875 = quantile(flux, 0.875),
+             q.975 = quantile(flux, 0.975)) %>% 
+  ungroup() %>% 
+  ggplot()+
+  geom_hline(yintercept = bg_estimate$q.5, size= 2)+
+  geom_rect(data = bg_estimate, aes(ymin = q.25, ymax = q.75, xmin = -Inf, xmax = Inf), 
+            fill = "gray30", alpha = 0.3)+
+  geom_rect(data = bg_estimate, aes(ymin = q.125, ymax = q.875, xmin = -Inf, xmax = Inf), 
+            fill = "gray50", alpha = 0.3)+
+  geom_rect(data = bg_estimate, aes(ymin = q.025, ymax = q.975, xmin = -Inf, xmax = Inf), 
+            fill = "gray70", alpha = 0.3)+
+  geom_point(data= vals_all %>% 
+               mutate(type = fct_recode(type, "**CH<sub>4</sub>**" = "ch4", "**River <br>area**" = "area", "**Gas <br>transfer<br> velocity**" = "k"),
+                      change = fct_recode(change, "+1 SD" = "plus_1SD", "-1 SD" = "minus_1SD")) %>% 
+               filter(!type == "normal"),
+             aes(x = type, y = flux, color= change),  position = position_dodge(width = .3), alpha= .3, shape= 108, size= 1.5)+
+  geom_point(data= vals_all %>% filter(type == "normal"),
+             aes(x = .43, y = flux),  alpha= .3, shape= 108, size= 3, color = "gray40")+
+  geom_point(aes(x = type,  color = change, y= q.5), position = position_dodge(width = .3), size= 6, shape=108, show.legend = F)+
+  geom_linerange(aes(x = type,  color = change, ymin = q.25, ymax = q.75), position = position_dodge(width = .3), size= 4)+
+  geom_linerange(aes(x = type,  color = change, ymin = q.125, ymax = q.875), position = position_dodge(width = .3), size= 3, show.legend = F)+
+  geom_linerange(aes(x = type,  color = change, ymin = q.025, ymax = q.975), position = position_dodge(width = .3), size= 2, show.legend = F)+
+  scale_color_manual(values = c("brown3", "blue3"))+
+  theme_bw()+
+  coord_flip()+
+  labs(y= "Emission estimate (Pg CH<sub>4</sub> yr<sup>-1</sup>)", x= "", color = "")+
+  theme(legend.position = "top", axis.text.y = ggtext::element_markdown(size= 11, hjust = 0),
+        axis.title.x = ggtext::element_markdown())
+
+ggsave("figures/supplementary/sensitivity.png", scale= .8)
