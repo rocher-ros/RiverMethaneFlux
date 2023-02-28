@@ -7,7 +7,7 @@
 
 # Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'RCurl', 'sf', 'XML', 'countrycode', 'leaflet', 'lwgeom')
+package_list <- c('tidyverse', 'RCurl', 'sf', 'XML', 'rworldmap', 'leaflet', 'lwgeom')
 
 # Check if there are any packages missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -25,7 +25,7 @@ lapply(package_list, require, character.only = TRUE)
 
 
 #load the methane DB 
-load(file.path("data", "MethDB_tables_converted.rda"))
+load(file.path("data", "GRiMeDB.rda"))
 
 ## Prepare the things for the download of GRADES ----
 dir.create("data/raw/grades")
@@ -62,33 +62,67 @@ if(all(file.exists(paste("data/raw/grades", files, sep="/"))) == TRUE){
 
 ## Prepare the files for processing ----
 
-#select the sites, and make a new column to get the continent name. This will be the way to break the processing in pieces
+#select the sites, and make a new column to get the continent name. This will be the way to break the processing in pieces.
+# For that we need a function, I use this one: https://stackoverflow.com/questions/21708488/get-country-and-continent-from-longitude-and-latitude-point-in-r
+
+
+coords2continent = function(lat, lon)
+{  
+  points <- data.frame(lon, lat)
+  countriesSP <- getMap(resolution='low')
+  #countriesSP <- getMap(resolution='high') #you could use high res map from rworldxtra if you were concerned about detail
+  
+  # converting points to a SpatialPoints object
+  # setting CRS directly to that from rworldmap
+  pointsSP = SpatialPoints(points, proj4string=CRS(proj4string(countriesSP)))  
+  
+  
+  # use 'over' to get indices of the Polygons object containing each point 
+  indices = over(pointsSP, countriesSP)
+  
+  #indices$continent   # returns the continent (6 continent model)
+  indices$REGION   # returns the continent (7 continent model)
+  #indices$ADMIN  #returns country name
+  #indices$ISO3 # returns the ISO3 code 
+}
+
+
 sites_meth <- sites_df %>%  
-  mutate(lat = ifelse(is.na(lat_new) == TRUE, Latitude, lat_new),
-         lon = ifelse(is.na(lon_new) == TRUE, Longitude, lon_new)) %>% 
-  dplyr::select(Site_Nid, lat, lon, country=Country) %>%
+  mutate(lat = ifelse(is.na(Latitude_snapped) == TRUE, Latitude, Latitude_snapped),
+         lon = ifelse(is.na(Longitude_snapped) == TRUE, Longitude, Longitude_snapped)) %>% 
+  dplyr::select(Site_ID, lat, lon) %>%
   drop_na(lat) %>% 
-  mutate(continent =  countrycode(sourcevar = country,
-                                  origin = "country.name",
-                                  destination = "continent"),
-         #this needed some manual fixing in some cases
-         continent = case_when(lat > 45 & lon > 60 ~ "Asia",
-                               lat < 4.7 & lon > 108 ~ "Oceania",
-                               lat < 1  & lon > 100 ~ "Oceania",
-                               Site_Nid %in% c(2405, 9299, 9303) ~ "Europe",
-                               Site_Nid %in% 12164 ~ "Asia",
-                               Site_Nid %in% 7428 ~ "Americas",
-                               Site_Nid %in% 8581 ~ "Africa",
-                               country %in% c("Scotland", "England") ~ "Europe",
-                               country == "Bangaladesh" ~ "Asia",
-                               TRUE ~ continent)) %>% 
-  st_as_sf( coords = c("lon", "lat"), crs = 4326)
+  mutate(continent =  coords2continent(lat, lon) )
+           
+
 
 #check if there are some without continent
 sites_meth %>% 
   filter(is.na(continent) == TRUE) %>% 
   print(n=60)
 
+leaflet() %>% 
+  addProviderTiles("Esri.WorldImagery") %>% 
+  addCircles(data= sites_meth %>% 
+               filter(is.na(continent) == TRUE), label = ~Site_ID,
+             color= "red") %>% 
+  addMeasure(primaryLengthUnit = "meters", primaryAreaUnit = "sqmeters")
+
+#We need to fix those sites with unassigned continent
+sites_meth <- sites_meth %>% 
+  mutate(
+    #this needed some manual fixing in some cases
+    continent = case_when(lat > 5 & lon > 60 ~ "Asia",
+                          lat < 4.7 & lon > 108 ~ "Oceania",
+                          lon < -30 & lon > -133 & lat > 15 ~"North America",
+                          lon < -30 & lon > -133 & lat < 15 ~"South America",
+                          lon > 0 & lon < 20 & lat < 15 ~"Africa",
+                          lon > -30 & lon < 60 & lat > 15 ~ "Europe",
+                          lat < 1 & lon < 103 & lon > 96 ~ "Oceania",
+                          TRUE ~ continent)) %>% 
+  st_as_sf( coords = c("lon", "lat"), crs = 4326)
+  
+  
 
 #get the files than end in .shp, and separate them in catchments and networks. 
 #This is becase we want to attach sites to the closest reach
@@ -103,7 +137,8 @@ shapes_catchments <- shape_files[grepl("cat", shape_files)]
 #check the file sizes, in MB
 file.size(shapes_catchments)/1e+6
 
-#The shp +dbf will go over the RAM capacity, we will need to do it in parts
+#The shp +dbf will go over the RAM capacity, we will need to do it in parts. It is also a good way to 
+# do some QAQC
 
 
 ## Start with #1, which is Africa ----
@@ -147,7 +182,7 @@ leaflet() %>%
   addProviderTiles("Esri.WorldImagery") %>% 
   addPolylines(data= africa[nearest,], label = ~COMID,
                color= "blue") %>% 
-  addCircles(data= sites_in_africa, label = ~Site_Nid,
+  addCircles(data= sites_in_africa, label = ~Site_ID,
              color= "red") %>% 
   addMeasure(primaryLengthUnit = "meters", primaryAreaUnit = "sqmeters")
 
@@ -194,7 +229,7 @@ leaflet() %>%
   addPolylines(data= europe[nearest,],#europe %>%st_crop(xmin=10, xmax=20, ymin=55, ymax=59), 
                label = ~COMID,
                color= "blue") %>% 
-  addCircles(data= sites_in_europe, label = ~Site_Nid,
+  addCircles(data= sites_in_europe, label = ~Site_ID,
              color= "red") %>% 
   addMeasure(primaryLengthUnit = "meters", primaryAreaUnit = "sqmeters")
 
@@ -246,7 +281,7 @@ leaflet() %>%
   addPolylines(data= asia[nearest,],
                label = ~COMID,
                color= "blue") %>% 
-  addCircles(data= sites_in_asia, label = ~Site_Nid,
+  addCircles(data= sites_in_asia, label = ~Site_ID,
              color= "red") %>% 
   addMeasure(primaryLengthUnit = "meters", primaryAreaUnit = "sqmeters")
 
@@ -294,7 +329,7 @@ leaflet() %>%
   addPolylines(data= oceania[nearest,],#europe %>%st_crop(xmin=10, xmax=20, ymin=55, ymax=59), 
                label = ~COMID,
                color= "blue") %>% 
-  addCircles(data= sites_in_oceania, label = ~Site_Nid,
+  addCircles(data= sites_in_oceania, label = ~Site_ID,
              color= "red") %>% 
   addMeasure(primaryLengthUnit = "meters", primaryAreaUnit = "sqmeters")
 
@@ -311,7 +346,7 @@ america <- rbind(south_america, north_america, north_america2, greenland)
 rm(south_america, north_america, north_america2, greenland)
 
 sites_in_america <- sites_meth %>% 
-  filter(continent %in% "Americas")
+  filter(continent %in% c("North America", "South America"))
 
 #to double check, plot 1000 of the sites randomly selected
 sample_n(america , 2000) %>% 
@@ -321,7 +356,7 @@ sample_n(america , 2000) %>%
   geom_sf(data=sites_in_america, color="red")
 
 #there is one site in Hawai that snaps to the Auletian islands, I remove it
-sites_in_america <- sites_in_america %>% filter(!Site_Nid == "7352")
+sites_in_america <- sites_in_america %>% filter(!Site_ID == "7352")
 
 #find the nearest GRADES network
 nearest <- st_nearest_feature(sites_in_america, america)
@@ -350,7 +385,7 @@ leaflet() %>%
   addPolylines(data= america[nearest,],
                label = ~COMID,
                color= "blue") %>% 
-  addCircles(data= sites_in_america, label = ~Site_Nid,
+  addCircles(data= sites_in_america, label = ~Site_ID,
              color= "red") %>% 
   addMeasure(primaryLengthUnit = "meters", primaryAreaUnit = "sqmeters")
 

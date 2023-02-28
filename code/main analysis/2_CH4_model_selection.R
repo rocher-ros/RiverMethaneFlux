@@ -1,12 +1,14 @@
 ########################################.
 #### R script to select a good ML model for CH4 concentrations in rivers
-#### Last edit: 2022-04-22
+#### Here I first roughly assess the structure and distribution of the data, then tune different ML models
+#### (Neural network, XGboost, Random forest), and evaluate the performance among them to select the best one
+#### Last edit: 2023-03-10
 ########################################.
 
 
 # 0. Load  and install packages ----
 # List of all packages needed
-package_list <- c('tidyverse', 'tidymodels', 'ranger', 'lubridate', 'vip', 'corrr', 'ggpubr')
+package_list <- c('tidyverse', 'tidymodels', 'ranger', 'lubridate', 'corrr', 'ggpubr')
 
 # Check if there are any packacges missing
 packages_missing <- setdiff(package_list, rownames(installed.packages()))
@@ -35,7 +37,7 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 # 3. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
 #    Thermogenically affected, Ditches
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
-  filter(Aggregated == "No", distance_snapped < 10000,
+  filter(Aggregated == "No", distance_snapped < 5000,
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
   mutate( month = month(date)) %>% 
   dplyr::select( COMID, Site_ID, CH4mean, month, GPP_yr:month, 
@@ -405,7 +407,8 @@ ggplot(data= preds_comp, aes(exp(observed), exp(prediction)))+
   theme_bw()
 
 
-## Now check their performance on monthly datasets
+## Now we pack everything in a function, which will split the dataset for traiing/testing, 
+# fit the NN, RF and XGboost models, and evaluate their performance with the testing data
 predict_ML_grime <- function(df) {
   
   df <- df %>% dplyr::select(-month)
@@ -480,8 +483,6 @@ set.seed(123)
 # Second nest them by month,  third run the model with a map,
 # Fourth extract the model output and predicted values
 # the lst chunk adapted from: https://community.rstudio.com/t/many-models-with-overlapping-groups/1629/4
-# those are the most efficient lines of code I have ever written, 
-# 3 years ago it would have taken me about 900 lines of code!! 
 monthly_models <- lst(
   jan = . %>% filter(month %in% c(12,1,2)),
   feb = . %>% filter(month %in% 1:3),
@@ -513,7 +514,7 @@ monthly_models_unnested <- monthly_models %>%
   left_join(labelled_months, by = "month_label") %>% 
   mutate(labels = fct_relevel(labels, month.name)) 
 
-#calculate the RMSE for label sin the plot
+#calculate the parameters of the mdel fit and RMSE each month and model, we will do a table with this later
 lm_out <- monthly_models_unnested %>% 
   nest_by(labels, model) %>% 
   mutate(fit_lm = list(lm(prediction ~observed, data = data))) %>% 
@@ -529,9 +530,13 @@ rms_text <- monthly_models_unnested %>%
                                 model == "rf_pred" ~ "Random Forest",
                                 model == "xgboost_pred" ~ "Gradient boosting"))
 
-table_out <- rms_text %>% select(labels, algorithm, text) %>% 
+
+table_out <- rms_text %>% 
+  select(labels, algorithm, text) %>% 
   pivot_wider(names_from = labels, values_from = text) 
 
+# let's look at the table of model comparison, I used this during the review process.
 table_out
 
-table_out %>% write_csv("figures/supplementary/table_models.csv")
+table_out %>% 
+  write_csv("figures/supplementary/table_models.csv")

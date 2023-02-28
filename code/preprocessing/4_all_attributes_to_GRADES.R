@@ -1,7 +1,7 @@
 ########################################.
-#### R script to attach put all those predictors into one file for use in the modelling  
+#### R script to attach all those predictors into one file for use in the modelling  
 #### Author: Gerard Rocher-Ros
-#### Last edit: 2022-05-10
+#### Last edit: 2023-03-10
 ########################################.
 
 

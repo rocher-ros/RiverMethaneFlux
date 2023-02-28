@@ -36,7 +36,7 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 # 3. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
 #    Thermogenically affected, Ditches
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
-  filter(Aggregated == "No", distance_snapped < 10000,
+  filter(Aggregated == "No", distance_snapped < 5000,
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
   mutate( month = month(date)) %>% 
   dplyr::select( COMID, Site_ID, CH4mean, month, GPP_yr:month, 
@@ -356,24 +356,7 @@ ggplot(monthly_models_unnested, aes( x=Log_CH4mean-.pred))+
         strip.text = element_text(size=12))
 
 
-# Empirical coverage of confidence intervals from the quantile regression
-emp_coverage <- monthly_models_unnested %>%
-  group_by(month_label) %>% 
-  mutate(cover_50 = ifelse(Log_CH4mean >= q.25 & Log_CH4mean <= q.75, 1, 0),
-         cover_75 = ifelse(Log_CH4mean >= q.125 & Log_CH4mean <= q.875, 1, 0),
-         cover_95 = ifelse(Log_CH4mean >= q.05 & Log_CH4mean <= q.95, 1, 0)) %>% 
-  summarise(covered_50_prop = sum(cover_50) / n(),
-            covered_75_prop = sum(cover_75) / n(),
-            covered_95_prop = sum(cover_95) / n())
 
-
-emp_coverage
-
-
-monthly_models_unnested %>%
-  group_by(month_label) %>% 
-  mutate(cover_sd = ifelse(Log_CH4mean >= (.pred - sqrt(se)*1.96) & Log_CH4mean <= (.pred + sqrt(se)*1.96) , 1, 0))  %>% 
-  summarise( covered_sd_prop = sum(cover_sd) / n())
 
 ## Assess variable importance ----
 #variable importance. make a simple function to map through the df
@@ -609,11 +592,11 @@ vars_to_remove <-  global_preds %>%
   colnames(.)
 
 
-#do same transformations to the global dataset
+#do the same transformations to the global dataset
 global_preds_trans <- global_preds %>%
   select(-all_of(vars_to_remove)) %>% 
   mutate(across(.cols=all_of(vars_to_log_glob), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
-  rename_with( ~str_c("Log_", all_of(vars_to_log_glob)), .cols = all_of(vars_to_log_glob) )  %>% #rename the log transformed variables 
+  rename_with( ~str_c("Log_", vars_to_log_glob), .cols = all_of(vars_to_log_glob) )  %>% #rename the log transformed variables 
   drop_na()
 
 colnames(global_preds_trans)
@@ -648,7 +631,7 @@ assess_spatial_extrapolation <- function(df_sampled, df_global, month, plot_the_
   
   # We do a PCA of the global dataset
   pca_all <- df_together %>% 
-    dplyr::select(-COMID, -type) %>% 
+    dplyr::select(-COMID, -type, -biome_label) %>% 
     scale() %>% 
     prcomp()
   
@@ -698,22 +681,6 @@ assess_spatial_extrapolation <- function(df_sampled, df_global, month, plot_the_
     points_in_hull <- sp::point.in.polygon(pca_df_selected$PC_x, pca_df_selected$PC_y, hull$PC_x, hull$PC_y )
     points_in_hull <- if_else(points_in_hull >= 1, 1, 0)
     
-    #make a plot of the space, optional parameter
-    if(plot_the_space == TRUE){
-      
-      ggplot()+
-        geom_hex(data = pca_df_selected %>% filter(type == "world"), 
-                 aes(PC_x, PC_y))+
-        geom_polygon(data = hull, aes(PC_x, PC_y), alpha = 0.4, , color= "red3")+
-        geom_point(data = pca_df_selected %>% filter(type == "sampled"), 
-                   aes(PC_x, PC_y), alpha=.5, color= "red3")+
-        scale_fill_viridis_c()+
-        theme_classic()+
-        labs(x = paste(PC_to_select[1]), y = paste(PC_to_select[2]),
-             title= paste(PC_to_select[1], "x", PC_to_select[2]))
-      ggsave(paste0( "figures/PCAs_examples/", PC_to_select[1], "x", PC_to_select[2], ".png") )
-    }
-    
     #update the file
     dat_out <- dat_out %>%
       mutate(obs = obs + points_in_hull)
@@ -732,21 +699,22 @@ assess_spatial_extrapolation <- function(df_sampled, df_global, month, plot_the_
   
 }
 
+# now run the funciton for each month.
+jan_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 1)
+feb_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 2)
+mar_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 3)
+apr_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 4)
+may_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 5)
+jun_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 6)
+jul_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 7)
+aug_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 8)
+sep_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 9)
+oct_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 10)
+nov_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 11)
+dec_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 12)
 
-jan_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 1, plot_the_space = FALSE)
-feb_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 2, plot_the_space = FALSE)
-mar_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 3, plot_the_space = FALSE)
-apr_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 4, plot_the_space = FALSE)
-may_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 5, plot_the_space = FALSE)
-jun_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 6, plot_the_space = FALSE)
-jul_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 7, plot_the_space = FALSE)
-aug_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 8, plot_the_space = FALSE)
-sep_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 9, plot_the_space = FALSE)
-oct_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 10, plot_the_space = FALSE)
-nov_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 11, plot_the_space = FALSE)
-dec_extrap <- assess_spatial_extrapolation(grimeDB_attr_trans, global_preds_trans, month = 12, plot_the_space = FALSE)
 
-
+#and join all the files into one, by COMID
 extrap_monthly <- jan_extrap %>% 
   left_join(feb_extrap, by = "COMID") %>% 
   left_join(mar_extrap, by = "COMID") %>% 
@@ -761,6 +729,7 @@ extrap_monthly <- jan_extrap %>%
   left_join(dec_extrap, by = "COMID")  
 
 
+#do a quick check of how many ragions are covered, that is, above a 90% threshold
 extrap_monthly %>% 
   pivot_longer(-COMID, values_to = "frac_int", names_to = "month") %>% 
   group_by(month) %>% 

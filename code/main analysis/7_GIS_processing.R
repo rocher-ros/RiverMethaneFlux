@@ -189,10 +189,10 @@ meth_hexes_avg %>%
 
 
 #now we do the extrapolated areas, aggregated by hex
-#join the meth data to the grid
+#join the  data to the grid
 extrap_hexes <- st_join(extrap_areas, grid, join = st_intersects)
 
-#now aggregate all the meth data for each hex, do means and sum for area.
+#now aggregate all the interp data for each hex, do means and sum for area.
 extrap_hexes_avg <- extrap_hexes %>% 
   st_drop_geometry() %>%
   group_by(index) %>%
@@ -218,6 +218,7 @@ extrap_hexes_avg %>% #extrap_pols %>%
 
 
 # Produce 1 10x10 km tiff for flux rates and total emissions ----
+#unfinished
 rm(list = ls())
 
 #upscaled methane fluxes

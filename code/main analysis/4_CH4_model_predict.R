@@ -33,7 +33,7 @@ if(file.exists("data/processed/grimeDB_concs_with_grade_attributes.csv") == TRUE
 # 2. remove Downstream of a Dam, Permafrost influenced, Glacier Terminus, downstream of a Point Source,
 #    Thermogenically affected, Ditches
 grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attributes.csv") %>% 
-  filter(Aggregated == "No", distance_snapped < 10000,
+  filter(Aggregated == "No", distance_snapped < 5000,
          !str_detect(Channel_type,"DD|PI|GT|PS|TH|Th|DIT")) %>%
   mutate( month = month(date)) %>% 
   dplyr::select( COMID, Site_ID, CH4mean, month, GPP_yr:month, 

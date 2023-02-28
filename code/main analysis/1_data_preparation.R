@@ -1,7 +1,8 @@
 ########################################.
-#### R script to extract all predictor variables from the GRADES dataset, prior the modelling in the next scripts
+#### R script to extract all predictor variables from the GRADES dataset to the observations in GRiMeDB, 
+#### prior the modelling in the next scripts
 #### Author: Gerard Rocher-Ros
-#### Last edit: 2022-04-22
+#### Last edit: 2023-03-10
 ########################################.
 
 # Load  and install packages ----
@@ -26,7 +27,7 @@ lapply(package_list, require, character.only = TRUE)
 
 ## Pack GRiMeDB into a .rda file ----
 
-path_grime <- "/Users/gdro0001/Downloads/knb-lter-ntl.420.1" # Put the path wherever you have downloaded GRiMe
+path_grime <- "/Users/gdro0001/Downloads/knb-lter-ntl.420.1" # Put the path wherever you have downloaded GRiMeDB
 
 sites_df <- read_csv(file.path(path_grime, "GRiMe_sites.csv"))
 papers_df <- read_csv(file.path(path_grime, "GRiMe_sources.csv"))
@@ -47,8 +48,7 @@ sites_df <- sites_df %>%
   mutate(Channel_type = ifelse(is.na(Channel_type) == TRUE, "normal", Channel_type)) 
 
 #read the GRADES id (COMID) that belongs to each site in GRiMeDB
-grime_comids <- read_csv("data/processed/sites_meth_comid.csv") %>% 
-  rename(Site_ID= Site_Nid)
+grime_comids <- read_csv("data/processed/sites_meth_comid.csv") 
 
 
 sites_clean <- sites_df %>% 
