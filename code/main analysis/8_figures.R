@@ -1,7 +1,7 @@
 ########################################.
 #### Script to generate the main figures in the manuscript, some figures are generated in script #2 though
 #### Author:  Gerard Rocher-Ros
-#### Last edit: 2022-05-10
+#### Last edit: 2023-03-10
 ########################################.
 
 
@@ -993,35 +993,6 @@ mean(flux_sites$Diffusive_CH4_Flux_Mean, na.rm=TRUE)
 methods_comp %>% 
   group_by(method) %>% 
   summarise(flux = mean(flux*1000/16, na.rm = TRUE))
-
-
-#plot some other variables fors presentations
-imp_features <- read_sf("data/processed/GIS/important_features.shp") %>%
-  st_transform("+proj=eqearth +wktext") 
-
-names(imp_features)
-
-ggplot() +
-  geom_sf(
-    data = imp_features, color = NA,
-    aes( fill = exp(Lg_k_mn)) )+
-  geom_sf(data = lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
-  scale_fill_viridis_c(
-    option = "viridis", na.value = "gray",
-    direction = - 1, trans= "log10",
-    name = "**k<sub>600</sub>** <br>(m d<sup>-1</sup>)")+
-  coord_sf(xlim = c(-15000000, 16000000), ylim = c(-8600000, 8600000), expand = FALSE) +
-  guides( fill = guide_colourbar(title.position = "top"))+
-  theme_void()+
-  theme(legend.position = c(0.11, 0.35),
-        legend.direction = "vertical",
-        legend.title = ggtext::element_markdown(size = 10),
-        legend.text = element_text(size=9),
-        legend.key.height  = unit(.5, 'cm'),
-        legend.key.width =  unit(.3, 'cm'))
-
-
-ggsave(filename = "figures/supplementary/map_k.jpg", dpi= 1000, scale = .6)
 
 
 

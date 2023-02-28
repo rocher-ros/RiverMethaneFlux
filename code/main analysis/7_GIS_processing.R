@@ -1,9 +1,9 @@
 ########################################.
 #### Script to process files into GIS layers for further visualization. 
-#### This script uses the modelled methane concentrations in scripts #3, and upscaled fluxes from scripts #4 to
+#### This script uses the modelled methane concentrations in scripts #4, and upscaled fluxes from scripts #5 to
 #### produce GIS shapefiles for visualization. Data is aggregated with larger hexes to represent broad patterns.
 #### Author:  Gerard Rocher-Ros
-#### Last edit: 2022-05-10
+#### Last edit: 2023-03-10
 ########################################.
 
 

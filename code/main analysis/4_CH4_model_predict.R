@@ -85,8 +85,8 @@ vars_to_remove_glob <-  global_preds %>%
 
 #dataset with some variables log transformed
 grimeDB_attr_trans <- grimeDB_attributes %>%
-  mutate(across(.cols=all_of(vars_to_log), ~log(.x+.1))) %>%  #log transform those variables, shift a bit from 0 as well
-  rename_with( ~str_c("Log_", all_of(vars_to_log)), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
+  mutate(across(.cols=all_of(vars_to_log), ~log(.x + .1))) %>%  #log transform those variables, shift a bit from 0 as well
+  rename_with( ~str_c("Log_", vars_to_log), .cols = all_of(vars_to_log) ) #rename the log transformed variables 
 
 
 #do same transformations to the global dataset
@@ -247,4 +247,3 @@ ch4_dec <- predict_methane(data_model_monthly, 12, global_preds_trans)
 
 #the function already exports the monthly file so nothing else to do here
 
-sum(is.na(ch4_jan$Jan_se))

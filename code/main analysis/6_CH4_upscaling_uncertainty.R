@@ -1,9 +1,22 @@
 ########################################.
 #### Script upscale CH4 emissions in rivers globally.
-#### Author:  Gerard Rocher-Ros, modified from Shaoda Liu
-#### Last edit: 2022-09-10
+#### This script is a modified version of "5_CH4_upscaling.R", which performs an uncertiainity quantification an dsensitivity analysis.
+#### Author:  Gerard Rocher-Ros, based on upscaling procedures by Shaoda Liu
+#### Last edit: 2023-03-10
+
 ########################################.
-rm(list = ls())
+# To do this:
+# First of all, define what you will do, either just a normal uncertainty or a sensitivity analysis, 
+# you do this by setting the two variables below. The default is an uncertainity analysis.
+# Sensitivity analysis is done by increasing or decreasing a given variable 1SD, the variables included are methane concentration, k and river area.
+# To do the full sensitivity analysis, it should be done 6 times, one for eqch variable and change, and thus the script should be re-run with a different 
+# combination of parameters. It takes multiple hours to perform with an n = 1000
+
+#Variable that controls how we are doing the sensitivity
+sens_var = "none" #can be "ch4" , "k", "area"
+sens_change = "none"  # can be "plus1SD" or "minus1SD"
+
+
 # Load  and install packages and functions ----
 # List of all packages needed
 package_list <- c('tidyverse')
@@ -44,9 +57,8 @@ timedryout_calculater <- function(Q) {
 # Load files ----
 
 # load file with discharge and k data 
-hydro_k <- read_csv("data/processed/q_and_k.csv") #%>%  
-# Uncomment to cap fluxes with a k threshold, based on Ulseth et al. 2018
-#mutate(across(ends_with("_k"), ~ifelse( .x > 35, 35, .x)))
+hydro_k <- read_csv("data/processed/q_and_k.csv") 
+
 
 #upscaled methane concentrations
 #mean estimates are "month_ch4", while SD are "month_ch4_sd"
@@ -107,6 +119,7 @@ df <- df  %>%
 
 #calculate WidthExp(exponent of the width-Q relationship)
 #the following procedure prevents unrealistic widthExp estimates
+#Following Liu et al. 2022
 
 df <- df %>% 
   mutate( WidthExp = case_when( log(runoffFL) <= 1.6 & log(yeaQmean) <= -7  ~ 0.074 * log(yeaQcv) - 0.026 * 1.6 - 0.011 * (-7) + 0.36,
@@ -192,7 +205,10 @@ wkbasins <- wkbasins %>%
 rm(prectemp)
 
 ## Here we do the extrapolation ----
+
+
 # Extrapolation of stream orders, surface area and fluxes for the wkbasins, for each month 
+
 for(i in 1:78){
   print(paste0('Processing the ', i, ' basin ...'))
   
@@ -341,27 +357,36 @@ for(i in 1:78){
                      ch4E = NA,
                      ch4E_sd = NA,
                      area_km2 = NA,
-                     ephemArea_km2 = NA) #%>% 
-     # mutate(
-    #    area_km2 = width_m * length_km / 1000,
-    #    ephemArea_km2 = area_km2 * ephemAreaRatio
-    #  )
+                     ephemArea_km2 = NA) 
     
-    #correct for negative effective area
-    #extrap[extrap$ephemArea_km2 > extrap$area_km2, ]$ephemArea_km2 <- extrap[extrap$ephemArea_km2 > extrap$area_km2, ]$area_km2
-
-    days_months <- data.frame(Mon = month.abb ,
+    
+    days_months <- data.frame(Mon = month.abb,
                               days = c(31,28,31,30,31,30,31,31,30,31,30,31) )
     
     
     for(j in seq_along(extrap$wkbasin)){
       
-      ch43 = rnorm(1000, extrap$ch4ex[j] , extrap$ch4_sd[j])
-      ch4F3 = ifelse(ch43 < 0, 0, ch43)* rnorm(1000, extrap$k[j], extrap$k_sd[j])* 12
-      width =  rnorm(1000, extrap$width_m[j], extrap$width_m_sd[j])
-      area_km2 = ifelse(width < 0, 0, width) * extrap$length_km[j] / 1000
+      
+      ch43 = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(1000, extrap$ch4ex[j] + extrap$ch4_sd[j] , extrap$ch4_sd[j]),
+                       sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(1000, extrap$ch4ex[j] - extrap$ch4_sd[j] , extrap$ch4_sd[j]),
+                       TRUE ~ rnorm(1000, extrap$ch4ex[j] , extrap$ch4_sd[j]))
+      
+      ch43 = ifelse(ch43 < 0, 0, ch43) #set negative values to 0
+
+      ch4F3 = case_when(sens_var == "k" & sens_change == "plus1SD" ~ ch43 * rnorm(1000, extrap$k[j] + extrap$k_sd[j], extrap$k_sd[j])* 12, 
+                        sens_var == "k" & sens_change == "minus1SD" ~ ch43 * rnorm(1000, extrap$k[j] - extrap$k_sd[j], extrap$k_sd[j])* 12, 
+                        TRUE ~ ch43 * rnorm(1000, extrap$k[j], extrap$k_sd[j])* 12)
+      
+      
+      width = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(1000, extrap$width_m[j] + extrap$width_m_sd[j], extrap$width_m_sd[j]), 
+                        sens_var == "area" & sens_change == "minus1SD" ~ rnorm(1000, extrap$width_m[j] - extrap$width_m_sd[j], extrap$width_m_sd[j]), 
+                        TRUE ~ rnorm(1000, extrap$width_m[j], extrap$width_m_sd[j]))
+           
+      width = ifelse(width < 0, 0, width) # fix negative widths by setting them to 0
+      
+      area_km2 = width * extrap$length_km[j] / 1000
       ephemArea_km2 = area_km2 * extrap$ephemAreaRatio[j]
-      ephemArea_km2 = ifelse(ephemArea_km2 > area_km2, area_km2, ephemArea_km2 ) 
+      ephemArea_km2 = ifelse(ephemArea_km2 > area_km2, area_km2, ephemArea_km2 )     #correct for negative effective area
       effecArea_km2 = area_km2 - ephemArea_km2
       ch4E = ch4F3 * effecArea_km2
       
@@ -371,8 +396,6 @@ for(i in 1:78){
      extrap$ch4E_sd[j] = sd(ch4E) * days_months$days[days_months$Mon == Mon] * 1000
      extrap$area_km2[j] = median(area_km2)
      extrap$ephemArea_km2[j] = median(ephemArea_km2)
-
-      
     }
     
     
@@ -411,7 +434,7 @@ for(i in 1:78){
 }
 
 #remove everything except the useful stuff
-rm(list = setdiff(ls(), c("df", "basinArea" )))
+rm(list = setdiff(ls(), c("df", "basinArea", "sens_change", "sens_var")))
 gc()
 
 
@@ -577,14 +600,12 @@ rm(df)
 gc()
 
 #ch4 emissions for the whole reach, correcting by time dry and time under ice cover, and per month, not day
-#here we do the MC
+# here we do the MC ----
 
+#here you set how big should the MC be
+n_mc = 1000
 
-
-df1 %>% 
-  select(ends_with(c("ch4ex")))
-
-vals_out <- tibble(rep= 1:1000,
+vals_out <- tibble(rep= 1:n_mc,
                   flux= NA)
 
 
@@ -592,42 +613,114 @@ for(i in seq_along(vals_out$rep)){
 
 flux_reaches <- df1 %>% 
     mutate(
-      Jan_ch4ex = rnorm(length(df1$COMID), Jan_ch4ex, Jan_ch4_sd),
-      Feb_ch4ex = rnorm(length(df1$COMID), Feb_ch4ex, Feb_ch4_sd),
-      Mar_ch4ex = rnorm(length(df1$COMID), Mar_ch4ex, Mar_ch4_sd),
-      Apr_ch4ex = rnorm(length(df1$COMID), Apr_ch4ex, Apr_ch4_sd),
-      May_ch4ex = rnorm(length(df1$COMID), May_ch4ex, May_ch4_sd),
-      Jun_ch4ex = rnorm(length(df1$COMID), Jun_ch4ex, Jun_ch4_sd),
-      Jul_ch4ex = rnorm(length(df1$COMID), Jul_ch4ex, Jul_ch4_sd),
-      Aug_ch4ex = rnorm(length(df1$COMID), Aug_ch4ex, Aug_ch4_sd),
-      Sep_ch4ex = rnorm(length(df1$COMID), Sep_ch4ex, Sep_ch4_sd),
-      Oct_ch4ex = rnorm(length(df1$COMID), Oct_ch4ex, Oct_ch4_sd),
-      Nov_ch4ex = rnorm(length(df1$COMID), Nov_ch4ex, Nov_ch4_sd),
-      Dec_ch4ex = rnorm(length(df1$COMID), Dec_ch4ex, Dec_ch4_sd),
-      Jan_ch4F = ifelse( Jan_ch4ex < 0, 0, Jan_ch4ex)*rnorm(length(df1$COMID), Jan_k, Jan_k_sd )*12/1000*(JanWidth >= 0.3),
-      Feb_ch4F = ifelse( Feb_ch4ex < 0, 0, Feb_ch4ex)*rnorm(length(df1$COMID), Feb_k, Feb_k_sd )*12/1000*(FebWidth >= 0.3),
-      Mar_ch4F = ifelse( Mar_ch4ex < 0, 0, Mar_ch4ex)*rnorm(length(df1$COMID), Mar_k, Mar_k_sd )*12/1000*(MarWidth >= 0.3),
-      Apr_ch4F = ifelse( Apr_ch4ex < 0, 0, Apr_ch4ex)*rnorm(length(df1$COMID), Apr_k, Apr_k_sd )*12/1000*(AprWidth >= 0.3),
-      May_ch4F = ifelse( May_ch4ex < 0, 0, May_ch4ex)*rnorm(length(df1$COMID), May_k, May_k_sd )*12/1000*(MayWidth >= 0.3),
-      Jun_ch4F = ifelse( Jun_ch4ex < 0, 0, Jun_ch4ex)*rnorm(length(df1$COMID), Jun_k, Jun_k_sd )*12/1000*(JunWidth >= 0.3),
-      Jul_ch4F = ifelse( Jul_ch4ex < 0, 0, Jul_ch4ex)*rnorm(length(df1$COMID), Jul_k, Jul_k_sd )*12/1000*(JulWidth >= 0.3),
-      Aug_ch4F = ifelse( Aug_ch4ex < 0, 0, Aug_ch4ex)*rnorm(length(df1$COMID), Aug_k, Aug_k_sd )*12/1000*(AugWidth >= 0.3),
-      Sep_ch4F = ifelse( Sep_ch4ex < 0, 0, Sep_ch4ex)*rnorm(length(df1$COMID), Sep_k, Sep_k_sd )*12/1000*(SepWidth >= 0.3),
-      Oct_ch4F = ifelse( Oct_ch4ex < 0, 0, Oct_ch4ex)*rnorm(length(df1$COMID), Oct_k, Oct_k_sd )*12/1000*(OctWidth >= 0.3),
-      Nov_ch4F = ifelse( Nov_ch4ex < 0, 0, Nov_ch4ex)*rnorm(length(df1$COMID), Nov_k, Nov_k_sd )*12/1000*(NovWidth >= 0.3),
-      Dec_ch4F = ifelse( Dec_ch4ex < 0, 0, Dec_ch4ex)*rnorm(length(df1$COMID), Dec_k, Dec_k_sd )*12/1000*(DecWidth >= 0.3),
-      Jan_ch4E = Jan_ch4F*Length*rnorm(length(df1$COMID),JanWidth, JanWidth*JanQcv )*(1-Jantimedryout)*(1-Jan_iceCov)*31,
-      Feb_ch4E = Feb_ch4F*Length*rnorm(length(df1$COMID),FebWidth, FebWidth*FebQcv )*(1-Febtimedryout)*(1-Feb_iceCov)*28,
-      Mar_ch4E = Mar_ch4F*Length*rnorm(length(df1$COMID),MarWidth, MarWidth*MarQcv )*(1-Martimedryout)*(1-Mar_iceCov)*31,
-      Apr_ch4E = Apr_ch4F*Length*rnorm(length(df1$COMID),AprWidth, AprWidth*AprQcv )*(1-Aprtimedryout)*(1-Apr_iceCov)*30,
-      May_ch4E = May_ch4F*Length*rnorm(length(df1$COMID),MayWidth, MayWidth*MayQcv )*(1-Maytimedryout)*(1-May_iceCov)*31,
-      Jun_ch4E = Jun_ch4F*Length*rnorm(length(df1$COMID),JunWidth, JunWidth*JunQcv )*(1-Juntimedryout)*(1-Jun_iceCov)*30,
-      Jul_ch4E = Jul_ch4F*Length*rnorm(length(df1$COMID),JulWidth, JulWidth*JulQcv )*(1-Jultimedryout)*(1-Jul_iceCov)*31,
-      Aug_ch4E = Aug_ch4F*Length*rnorm(length(df1$COMID),AugWidth, AugWidth*AugQcv )*(1-Augtimedryout)*(1-Aug_iceCov)*31,
-      Sep_ch4E = Sep_ch4F*Length*rnorm(length(df1$COMID),SepWidth, SepWidth*SepQcv )*(1-Septimedryout)*(1-Sep_iceCov)*30,
-      Oct_ch4E = Oct_ch4F*Length*rnorm(length(df1$COMID),OctWidth, OctWidth*OctQcv )*(1-Octtimedryout)*(1-Oct_iceCov)*31,
-      Nov_ch4E = Nov_ch4F*Length*rnorm(length(df1$COMID),NovWidth, NovWidth*NovQcv )*(1-Novtimedryout)*(1-Nov_iceCov)*30,
-      Dec_ch4E = Dec_ch4F*Length*rnorm(length(df1$COMID),DecWidth, DecWidth*DecQcv )*(1-Dectimedryout)*(1-Dec_iceCov)*31) %>% 
+      Jan_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Jan_ch4ex + Jan_ch4_sd, Jan_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Jan_ch4ex - Jan_ch4_sd, Jan_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Jan_ch4ex, Jan_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Feb_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Feb_ch4ex + Feb_ch4_sd, Feb_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Feb_ch4ex - Feb_ch4_sd, Feb_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Feb_ch4ex, Feb_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Mar_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Mar_ch4ex + Mar_ch4_sd, Mar_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Mar_ch4ex - Mar_ch4_sd, Mar_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Mar_ch4ex, Mar_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Apr_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Apr_ch4ex + Apr_ch4_sd, Apr_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Apr_ch4ex - Apr_ch4_sd, Apr_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Apr_ch4ex, Apr_ch4_sd)) %>% if_else(. < 0, 0, .),
+      May_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), May_ch4ex + May_ch4_sd, May_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), May_ch4ex - May_ch4_sd, May_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), May_ch4ex, May_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Jun_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Jun_ch4ex + Jun_ch4_sd, Jun_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Jun_ch4ex - Jun_ch4_sd, Jun_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Jun_ch4ex, Jun_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Jul_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Jul_ch4ex + Jul_ch4_sd, Jul_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Jul_ch4ex - Jul_ch4_sd, Jul_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Jul_ch4ex, Jul_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Aug_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Aug_ch4ex + Aug_ch4_sd, Aug_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Aug_ch4ex - Aug_ch4_sd, Aug_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Aug_ch4ex, Aug_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Sep_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Sep_ch4ex + Sep_ch4_sd, Sep_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Sep_ch4ex - Sep_ch4_sd, Sep_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Sep_ch4ex, Sep_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Oct_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Oct_ch4ex + Oct_ch4_sd, Oct_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Oct_ch4ex - Oct_ch4_sd, Oct_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Oct_ch4ex, Oct_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Nov_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Nov_ch4ex + Nov_ch4_sd, Nov_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Nov_ch4ex - Nov_ch4_sd, Nov_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Nov_ch4ex, Nov_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Dec_ch4ex = case_when(sens_var == "ch4" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Dec_ch4ex + Dec_ch4_sd, Dec_ch4_sd),
+                            sens_var == "ch4" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Dec_ch4ex - Dec_ch4_sd, Dec_ch4_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Dec_ch4ex, Dec_ch4_sd)) %>% if_else(. < 0, 0, .),
+      Jan_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Jan_k + Jan_k_sd, Jan_k_sd),
+                            sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Jan_k - Jan_k_sd, Jan_k_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Jan_k, Jan_k_sd))*Jan_ch4ex*12/1000*(JanWidth >= 0.3),
+      Feb_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Feb_k + Feb_k_sd, Feb_k_sd),
+                            sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Feb_k - Feb_k_sd, Feb_k_sd),
+                            TRUE ~ rnorm(length(df1$COMID), Feb_k, Feb_k_sd))*Feb_ch4ex*12/1000*(FebWidth >= 0.3),
+      Mar_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Mar_k + Mar_k_sd, Mar_k_sd),
+                           sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Mar_k - Mar_k_sd, Mar_k_sd),
+                           TRUE ~ rnorm(length(df1$COMID), Mar_k, Mar_k_sd))*Mar_ch4ex*12/1000*(MarWidth >= 0.3),
+      Apr_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Apr_k + Apr_k_sd, Apr_k_sd),
+                           sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Apr_k - Apr_k_sd, Apr_k_sd),
+                           TRUE ~ rnorm(length(df1$COMID), Apr_k, Apr_k_sd))*Apr_ch4ex*12/1000*(AprWidth >= 0.3),
+      May_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), May_k + May_k_sd, May_k_sd),
+                           sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), May_k - May_k_sd, May_k_sd),
+                           TRUE ~ rnorm(length(df1$COMID), May_k, May_k_sd))*May_ch4ex*12/1000*(MayWidth >= 0.3),
+      Jun_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Jun_k + Jun_k_sd, Jun_k_sd),
+                           sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Jun_k - Jun_k_sd, Jun_k_sd),
+                           TRUE ~ rnorm(length(df1$COMID), Jun_k, Jun_k_sd))*Jun_ch4ex*12/1000*(JunWidth >= 0.3),
+      Jul_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Jul_k + Jul_k_sd, Jul_k_sd),
+                           sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Jul_k - Jul_k_sd, Jul_k_sd),
+                           TRUE ~ rnorm(length(df1$COMID), Jul_k, Jul_k_sd))*Jul_ch4ex*12/1000*(JulWidth >= 0.3),
+      Aug_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Aug_k + Aug_k_sd, Aug_k_sd),
+                           sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Aug_k - Aug_k_sd, Aug_k_sd),
+                           TRUE ~ rnorm(length(df1$COMID), Aug_k, Aug_k_sd))*Aug_ch4ex*12/1000*(AugWidth >= 0.3),
+      Sep_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Sep_k + Sep_k_sd, Sep_k_sd),
+                           sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Sep_k - Sep_k_sd, Sep_k_sd),
+                           TRUE ~ rnorm(length(df1$COMID), Sep_k, Sep_k_sd))*Sep_ch4ex*12/1000*(SepWidth >= 0.3),
+      Oct_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Oct_k + Oct_k_sd, Oct_k_sd),
+                           sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Oct_k - Oct_k_sd, Oct_k_sd),
+                           TRUE ~ rnorm(length(df1$COMID), Oct_k, Oct_k_sd))*Oct_ch4ex*12/1000*(OctWidth >= 0.3),
+      Nov_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Nov_k + Nov_k_sd, Nov_k_sd),
+                           sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Nov_k - Nov_k_sd, Nov_k_sd),
+                           TRUE ~ rnorm(length(df1$COMID), Nov_k, Nov_k_sd))*Nov_ch4ex*12/1000*(NovWidth >= 0.3),
+      Dec_ch4F = case_when(sens_var == "k" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), Dec_k + Dec_k_sd, Dec_k_sd),
+                           sens_var == "k" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), Dec_k - Dec_k_sd, Dec_k_sd),
+                           TRUE ~ rnorm(length(df1$COMID), Dec_k, Dec_k_sd))*Dec_ch4ex*12/1000*(DecWidth >= 0.3),
+      Jan_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), JanWidth + JanWidth*JanQcv, JanWidth*JanQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), JanWidth - JanWidth*JanQcv, JanWidth*JanQcv),
+                           TRUE ~ rnorm(length(df1$COMID),JanWidth, JanWidth*JanQcv))*Jan_ch4F*Length*(1-Jantimedryout)*(1-Jan_iceCov)*31,
+      Feb_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), FebWidth + FebWidth*FebQcv, FebWidth*FebQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), FebWidth - FebWidth*FebQcv, FebWidth*FebQcv),
+                           TRUE ~ rnorm(length(df1$COMID),FebWidth, FebWidth*FebQcv))*Feb_ch4F*Length*(1-Febtimedryout)*(1-Feb_iceCov)*28,
+      Mar_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), MarWidth + MarWidth*MarQcv, MarWidth*MarQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), MarWidth - MarWidth*MarQcv, MarWidth*MarQcv),
+                           TRUE ~ rnorm(length(df1$COMID),MarWidth, MarWidth*MarQcv))*Mar_ch4F*Length*(1-Martimedryout)*(1-Mar_iceCov)*31,
+      Apr_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), AprWidth + AprWidth*AprQcv, AprWidth*AprQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), AprWidth - AprWidth*AprQcv, AprWidth*AprQcv),
+                           TRUE ~ rnorm(length(df1$COMID),AprWidth, AprWidth*AprQcv))*Apr_ch4F*Length*(1-Aprtimedryout)*(1-Apr_iceCov)*30,
+      May_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), MayWidth + MayWidth*MayQcv, MayWidth*MayQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), MayWidth - MayWidth*MayQcv, MayWidth*MayQcv),
+                           TRUE ~ rnorm(length(df1$COMID),MayWidth, MayWidth*MayQcv))*May_ch4F*Length*(1-Maytimedryout)*(1-May_iceCov)*31,
+      Jun_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), JunWidth + JunWidth*JunQcv, JunWidth*JunQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), JunWidth - JunWidth*JunQcv, JunWidth*JunQcv),
+                           TRUE ~ rnorm(length(df1$COMID),JunWidth, JunWidth*JunQcv))*Jun_ch4F*Length*(1-Juntimedryout)*(1-Jun_iceCov)*30,
+      Jul_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), JulWidth + JulWidth*JulQcv, JulWidth*JulQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), JulWidth - JulWidth*JulQcv, JulWidth*JulQcv),
+                           TRUE ~ rnorm(length(df1$COMID),JulWidth, JulWidth*JulQcv))*Jul_ch4F*Length*(1-Jultimedryout)*(1-Jul_iceCov)*31,
+      Aug_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), AugWidth + AugWidth*AugQcv, AugWidth*AugQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), AugWidth - AugWidth*AugQcv, AugWidth*AugQcv),
+                           TRUE ~ rnorm(length(df1$COMID),AugWidth, AugWidth*AugQcv))*Aug_ch4F*Length*(1-Augtimedryout)*(1-Aug_iceCov)*31,
+      Sep_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), SepWidth + SepWidth*SepQcv, SepWidth*SepQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), SepWidth - SepWidth*SepQcv, SepWidth*SepQcv),
+                           TRUE ~ rnorm(length(df1$COMID),SepWidth, SepWidth*SepQcv))*Sep_ch4F*Length*(1-Septimedryout)*(1-Sep_iceCov)*30,
+      Oct_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), OctWidth + OctWidth*OctQcv, OctWidth*OctQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), OctWidth - OctWidth*OctQcv, OctWidth*OctQcv),
+                           TRUE ~ rnorm(length(df1$COMID),OctWidth, OctWidth*OctQcv))*Oct_ch4F*Length*(1-Octtimedryout)*(1-Oct_iceCov)*31,
+      Nov_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), NovWidth + NovWidth*NovQcv, NovWidth*NovQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), NovWidth - NovWidth*NovQcv, NovWidth*NovQcv),
+                           TRUE ~ rnorm(length(df1$COMID),NovWidth, NovWidth*NovQcv))*Nov_ch4F*Length*(1-Novtimedryout)*(1-Nov_iceCov)*30,
+      Dec_ch4E = case_when(sens_var == "area" & sens_change == "plus1SD" ~ rnorm(length(df1$COMID), DecWidth + DecWidth*DecQcv, DecWidth*DecQcv),
+                           sens_var == "area" & sens_change == "minus1SD" ~ rnorm(length(df1$COMID), DecWidth - DecWidth*DecQcv, DecWidth*DecQcv),
+                           TRUE ~ rnorm(length(df1$COMID),DecWidth, DecWidth*DecQcv))*Dec_ch4F*Length*(1-Dectimedryout)*(1-Dec_iceCov)*31) %>% 
   select(COMID, wkbasin, subarea, Jan_ch4F:Dec_ch4F, Jan_ch4E:Dec_ch4E)
   
 flux_extrap <-   small_streams_ba %>% 
@@ -656,7 +749,7 @@ tot_reaches <- flux_reaches %>%
   summarise(total = sum(flux, na.rm = TRUE)/1e+12*16/12)  %>% #in TgCH4 / yr
   pull()
 
-  ## now get the estimate. For that, do the sum of the measured + extrapolated fluxes, for all months ----
+  ## now get the estimate. For that, do the sum of the measured + extrapolated fluxes, for all months 
 tot_flux <- tot_extrap + tot_reaches
 
 vals_out$flux[i] <- tot_flux
@@ -674,26 +767,15 @@ vals_out %>%
 ggplot(vals_out)+
   geom_histogram(aes(flux))
 
-
-vals_all <- read_csv("figures/supplementary/uncertaintiy_mc.csv") %>% 
+#If it is the first time running this, comment the line below to first create the file, later you can append new lines
+vals_all <- read_csv("figures/supplementary/uncertainty_mc.csv") %>% 
   bind_rows( vals_out %>% 
-    mutate(type = "area", 
-          change = "minus_1SD" )) %>% 
- write_csv("figures/supplementary/uncertaintiy_mc.csv")
+    mutate(type = sens_var, 
+          change = sens_change )) %>% 
+ write_csv("figures/supplementary/uncertainty_mc.csv")
 #
 
-#
-total_fluxes <- flux_reaches %>% 
-  left_join(flux_extrap %>% select(-c(Jan_ch4E_extrap:Dec_ch4E_extrap)), 
-            by = "wkbasin", suffix = c("_reach", "_extrap")) %>% 
-  mutate(across(Jan_rivArea_extrap:Dec_ch4E_sd_extrap, ~ .x * (subarea/total_basin_area)))
 
-names(total_fluxes)
-
-total_fluxes %>% 
-  select(COMID:Dec_ch4F, Jan_ch4F_cv:Dec_ch4E_reach, Jan_ch4E_extrap:Dec_ch4E_extrap,
-         Jan_area_m2:Dec_ephemarea_m2, Jan_iceCov:Dec_iceCov ) %>% 
-  write_csv( "data/processed/grades_ch4_fluxes.csv")
 
 
 #partitionng variance 
@@ -759,4 +841,7 @@ var_long <- var_unnested %>%
 var_long %>% 
   group_by(variable) %>% 
   summarise(mean=mean(variance)) 
+
+
+
 
