@@ -768,11 +768,11 @@ ggplot(vals_out)+
   geom_histogram(aes(flux))
 
 #If it is the first time running this, comment the line below to first create the file, later you can append new lines
-vals_all <- read_csv("figures/supplementary/uncertainty_mc.csv") %>% 
+vals_all <- read_csv("data/processed/uncertainty_mc.csv") %>% 
   bind_rows( vals_out %>% 
     mutate(type = sens_var, 
           change = sens_change )) %>% 
- write_csv("figures/supplementary/uncertainty_mc.csv")
+ write_csv("data/processed/uncertainty_mc.csv")
 #
 
 
