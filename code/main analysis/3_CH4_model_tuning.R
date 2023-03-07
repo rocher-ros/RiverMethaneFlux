@@ -46,8 +46,8 @@ grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attribut
 colnames(grimeDB_attributes)
 
 # file to have nicer names in the variables, to use later
-labeller_vars <- read_csv("data/processed/variables_names.csv") %>% 
-  mutate(label=str_replace(label, "9", ";"))
+labeller_vars <- read_csv("data/processed/variables_names.csv") #%>% 
+  #mutate(label=str_replace(label, "9", ";"))
 
 # 2. Explore the raw data and process before the modelling ----
 

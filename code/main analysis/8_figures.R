@@ -776,7 +776,7 @@ comp_systems <- Em_all %>%
   mutate(ecosystem.type = ecosystem.type %>% 
            fct_relevel("Rivers", after =Inf) %>%
            fct_relevel("Lakes", after= 2)) %>% 
-  filter(estimate < 5) %>% #there is an outlier in temperature that we remove
+  filter(estimate < 5) %>% #there is an outlier in rivers that we remove
   ggplot()+
   geom_density(aes(-estimate, fill= ecosystem.type, color = ecosystem.type), alpha =.2, size= 1) +
   geom_vline(xintercept = 0, linetype = 2)+ 
@@ -788,8 +788,7 @@ comp_systems <- Em_all %>%
   theme(legend.position = c(.2, .86))+
   guides(color = guide_legend(ncol = 1),
          fill = guide_legend(ncol = 1))+
-  labs(x= "Apparent activation energy (eV)", y = "Density", color= "", fill = "")
-
+  labs(x= "Apparent activation energy (eV)", y = "Kernel density", color= "", fill = "")
 
 
 plot_sites +
@@ -899,7 +898,7 @@ ggsave("figures/supplementary/river_size_temp.png", width = 12, scale = .7)
 # Ebullition assessment ----
 
 mycolors2 <- colorRampPalette(RColorBrewer::brewer.pal(8, "Paired"))(93)
-#ecomparison of ebullition and difussive fluxes in GRIMeDB, we remove observations close to 0, virtually 0
+#comparison of ebullition and difussive fluxes in GRIMeDB, we remove observations close to 0, virtually 0
 reg_compl_plot <- 
   flux_comid %>% 
   filter(Eb_CH4_Flux_Mean > 0.00001,
