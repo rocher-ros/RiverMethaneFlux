@@ -737,7 +737,7 @@ plot_sites <-
 
 # Comparison with other aquatic systems ----
 #we use the suppplementary data from Yvon-durocher et al. 2014. Can be downloaded here: https://doi.org/10.1038/nature13164 
-# we keep sites with more than 5 observations
+# we keep sites with more than 5 observations, and remove the ones without published data
 yvon_durocher2014 <- read_excel("~/Desktop/yvon-durocher2014.xlsx") %>% 
   filter(!temp == "see notes") %>% 
   mutate(across(c(temp, flux), as.numeric),
@@ -994,7 +994,7 @@ methods_comp %>%
 ## Also calculate the uncertianity on the ebullition estimate
 
 #file with the output of the MC simulations
-vals_all <- read_csv("figures/supplementary/uncertaintiy_mc.csv") 
+vals_all <- read_csv("data/processed//uncertaintiy_mc.csv") 
 
 #quick plot looking at the distribution of the uncertainty MC
 vals_all %>% filter(type == "normal" ) %>% 
