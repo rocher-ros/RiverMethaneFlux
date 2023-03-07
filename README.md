@@ -9,7 +9,9 @@ Currently the datasets are private, so you need access to run the code in this r
 Code is in the `code/` folder, with two categories: 
 - Folder `preprocessing/` for all the GIS processing to obtain all spatial predictors for the GRADES River network. This analysis requires many large files and will be available by request.
 - Folder `main analysis/` to reproduce the modelling, main results an figures in the paper.
-=======
+
+======
+
 # Global estimate of Riverine Methane Flux
 
 Project that quantifies CH4 emissions from rivers globally and monthly. This repository contains the code to process raw file, model CH4 concentrations and estimate CH4 emissions from rivers, as well as to produce the acompanying figures. The manuscript associated to this project is currently in preparation.
@@ -32,15 +34,11 @@ The folder `preprocessing/` contains four scripts that do the following:
 ## Main analysis
 The folder `main analysis/`  contains the following scripts:
 - `1_data_preparation.R`, which downloads the datasets needed for the analysis, and attaches all the attributes to the Methane database (GRiMeDB).
-- `2_CH4_model_assessment.R`, prepares the data and models CH4 concentrations using random forets models. This script assesses the model performance and produces the figures related to the model.
-- `3_CH4_model_predict.R`, uses the random forets model to predict CH4 concentrations to all river reaches in GRADES.
-- `4_CH4_upscaling.R`, uses the predicted CH4 concentrations and the hydrological model to upscale CH4 emissions globally.
-- `5_GIS_processing.R`, processess the output files onto shapefiles for further outputs as well as for visualization.
-- `6_figures.R` uses the model outputs and shapefiles produced to do the main figures of the manuscript.
+- `2_CH4_model_selection.R`, assesses the data, tries different ML models for the task.
+- `3_CH4_model_tuning.R`, tunes the random forest modeland predicts CH4 concentrations monthly. This script also assesses the model performance and produces the figures related to the model.
+- `4_CH4_model_predict.R`, uses the random forest model to predict CH4 concentrations to all river reaches in GRADES.
+- `5_CH4_upscaling.R`, uses the predicted CH4 concentrations and the hydrological model to upscale CH4 emissions globally.
+- `6_CH4_upscaling_uncertainty.R`, repeats the same procedure as the previous script but pushing a montecarlo to perform an uncertainty and sensitivity analysis on the model.
+- `7_GIS_processing.R`, processess the output files onto shapefiles for further outputs as well as for visualization.
+- `8_figures.R` uses the model outputs and shapefiles produced to do the main figures of the manuscript.
 
-
-
-
-
-
->>>>>>> 0e776afcaf4903ff153c976d406cd23417b4a631
