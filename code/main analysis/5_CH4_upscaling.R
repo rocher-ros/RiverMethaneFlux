@@ -609,17 +609,17 @@ df %>%
 #ggsave("figures/supplementary/footprints_reach_slopes.png")
 
 #stats to cap fluxes at 2 SD, uncoment to do that 
-# main_stats <- df %>%
-#   select(COMID, ends_with("ch4F")) %>%
-#   pivot_longer(-COMID, values_to = "flux", names_to = "month_flux") %>%
-#   summarise(sd = sd(flux, na.rm = TRUE),
-#             mean = mean(flux, na.rm = TRUE),
-#             median = median(flux, na.rm = TRUE),
-#             max = max(flux, na.rm = TRUE),
-#             min = min(flux, na.rm = TRUE),
-#             q.95 = quantile(flux, 0.95, na.rm = TRUE))
-# 
-# main_stats
+#main_stats <- df %>%
+#  select(COMID, ends_with("ch4F")) %>%
+#  pivot_longer(-COMID, values_to = "flux", names_to = "month_flux") %>%
+#  summarise(sd = sd(flux, na.rm = TRUE),
+#            mean = mean(flux, na.rm = TRUE),
+#            median = median(flux, na.rm = TRUE),
+#            max = max(flux, na.rm = TRUE),
+#            min = min(flux, na.rm = TRUE),
+#            q.95 = quantile(flux, 0.95, na.rm = TRUE))
+#
+#main_stats
 #
 #two_SD <- main_stats$sd * 2
 
@@ -634,7 +634,7 @@ df <- df %>%
   mutate(HYBAS_ID = as.character(HYBAS_ID)) %>% 
   left_join(icecov, by = 'HYBAS_ID') %>%
   #uncomment below to cap fluxes at 2SD
-  #mutate(across(ends_with("ch4F"), ~ifelse(.x > two_SD, two_SD, .x))) %>% #this line caps fluxes at two SD
+ #mutate(across(ends_with("ch4F"), ~ifelse(.x > two_SD, two_SD, .x))) %>% #this line caps fluxes at two SD
   mutate(Jan_ch4E = Jan_ch4F*Length*JanWidth*(1-Jantimedryout)*(1-Jan_iceCov)*31,
          Feb_ch4E = Feb_ch4F*Length*FebWidth*(1-Febtimedryout)*(1-Feb_iceCov)*28,
          Mar_ch4E = Mar_ch4F*Length*MarWidth*(1-Martimedryout)*(1-Mar_iceCov)*31,
@@ -699,17 +699,17 @@ df <- df %>%
 # 
 # write_csv(flux_cap_method, "data/processed/method_flux.csv")
 
-# uncorrected <- df %>% 
-#   select(COMID, ends_with(c("ch4","ch4F", "_k"))) %>% 
-#   drop_na(Jan_k, Jan_ch4) %>% 
-#   rowwise() %>% 
-#   mutate(k = mean(Jan_k:Dec_k, na.rm = TRUE),
-#          ch4 = mean(Jan_ch4:Dec_ch4, na.rm = TRUE),
-#          flux = mean(Jan_ch4F:Dec_ch4F, na.rm = TRUE),
-#          method = "uncorrected") %>% 
-#   select(method, k, ch4, flux)
-# 
-# write_csv(uncorrected, "data/processed/uncorrected.csv")
+#uncorrected <- df %>%
+#  select(COMID, ends_with(c("ch4","ch4F", "_k"))) %>%
+#  drop_na(Jan_k, Jan_ch4) %>%
+#  rowwise() %>%
+#  mutate(k = mean(Jan_k:Dec_k, na.rm = TRUE),
+#         ch4 = mean(Jan_ch4:Dec_ch4, na.rm = TRUE),
+#         flux = mean(Jan_ch4F:Dec_ch4F, na.rm = TRUE),
+#         method = "uncorrected") %>%
+#  select(method, k, ch4, flux)
+#
+#write_csv(uncorrected, "data/processed/uncorrected.csv")
 
 # paths_methods <- c("data/processed/uncorrected.csv",
 #                    "data/processed/method_k.csv",
@@ -812,10 +812,10 @@ total_fluxes %>%
 ## Summary from the different methods :
 ## Method ------- Total flux (Tg Ch4 yr-1)
 ## _______________________________________
-## Footprint ------- 12.8
-## k capped -------- 11.3
-## Flux capped ----- 13.9
-## Uncorrected ----- 14.1
+## Footprint ------- 13.3
+## k capped -------- 11.7
+## Flux capped ----- 14.4
+## Uncorrected ----- 14.6
 
 
 
@@ -826,10 +826,11 @@ total_fluxes %>%
 dupes <- total_fluxes %>%   filter(duplicated(.[["COMID"]])) %>% pull(COMID) %>% unique()
 
 
-total_fluxes %>% filter(!COMID %in% dupes) %>% 
+total_fluxes %>% 
+  filter(!COMID %in% dupes) %>% 
   bind_rows(total_fluxes %>% 
               filter(COMID %in% dupes) %>% 
-              summarise(across(everything(), first),.by = "COMID")) %>% 
+              summarise(across(everything(), first), .by = "COMID")) %>% 
   select(COMID:Dec_ch4F, Jan_ch4F_cv:Dec_ch4E_reach, Jan_ch4E_extrap:Dec_ch4E_extrap,
          Jan_area_m2:Dec_ephemarea_m2, Jan_iceCov:Dec_iceCov, Jantimedryout:Dectimedryout ) %>% 
   write_csv( "data/processed/grades_ch4_fluxes.csv")
