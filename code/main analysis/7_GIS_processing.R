@@ -27,7 +27,7 @@ sf_use_s2(FALSE)
 #upscaled methane fluxes
 meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) %>% 
   mutate(Fch4_mean = rowMeans(pick(ends_with("_ch4F")), na.rm = TRUE),
-         ch4_cv = rowMeans(pick(ends_with("ch4F_cv")), na.rm = TRUE) * 100,
+         #ch4_cv = rowMeans(pick(ends_with("ch4F_cv")), na.rm = TRUE) * 100,
          Ech4_reach = rowMeans(pick(ends_with("reach")), na.rm = TRUE),
          Ech4_extrap = rowMeans(pick(ends_with("extrap")), na.rm = TRUE),
          dry_mean = rowMeans(pick(ends_with("dryout")), na.rm = TRUE)) %>% 
@@ -35,11 +35,22 @@ meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) %>
 
 #upscaled methane concentrations
 #mean estimates are "month_ch4", while SD are "month_ch4_sd"
-meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "ch4_preds_uncertainty", full.names = TRUE), read_csv) %>% 
+#we got some modelled meth duplicated for a few sites, we need to clean this.
+meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "ch4_preds_uncertainty", full.names = TRUE), 
+                     read_csv) %>% 
   purrr::reduce(left_join, by = "COMID") %>% 
-  dplyr::select(COMID, ends_with("_mean")) %>% 
   rename_with( ~str_replace(.x, "mean", "ch4")) %>% 
-  dplyr::select(COMID, paste0(month.abb, "_ch4"))
+  rename_with( ~str_replace(.x, "se", "ch4_sd")) 
+
+#we find those duplicated sites
+dupes <- meth_concs %>% filter(duplicated(.[["COMID"]])) %>% pull(COMID) %>% unique()
+
+#take the first value and ut them back to the df
+meth_concs <- meth_concs %>% 
+  filter(!COMID %in% dupes) %>% 
+  bind_rows(meth_concs %>% 
+              filter(COMID %in% dupes) %>% 
+              summarise(across(everything(), first), .by = "COMID"))
 
 
 # load file with discharge and k data 
@@ -48,7 +59,7 @@ hydro_k <- read_csv("data/processed/q_and_k.csv") %>%
   mutate( k_mean = rowMeans(pick(ends_with("_k")), na.rm = TRUE)) %>% 
   dplyr::select(COMID, k_mean, runoff_yr)
 
-#read coordinates from grades
+#read coordinates from grades for mapping
 grades <- read_csv("data/processed/grades_coords.csv") 
 
 #read extrapolated areas
@@ -85,8 +96,9 @@ gc()
   
 
 meth_avg <- meth_gis %>% 
-  mutate( ch4_mean = rowMeans(pick(ends_with("_ch4")), na.rm = TRUE)) %>% 
-  dplyr::select(COMID:lon, ch4_mean, Fch4_mean, dry_mean, ch4_cv, Jan_ch4E_reach:Dec_ch4E_reach,
+  mutate( ch4_mean = rowMeans(pick(ends_with("_ch4")), na.rm = TRUE),
+          ch4_sd = rowMeans(pick(ends_with("_ch4_sd")), na.rm = TRUE)) %>% 
+  dplyr::select(COMID, lat, lon, ch4_mean, ch4_sd, Fch4_mean, dry_mean, Jan_ch4E_reach:Dec_ch4E_reach, ends_with("ch4"),
                 Jan_ch4F:Dec_ch4F, Jan_iceCov:Dec_iceCov, k_mean, runoff = runoff_yr) %>%
   st_as_sf( coords = c("lon", "lat"),  crs = 4326) %>%
   st_transform("+proj=eqearth +wktext") 
@@ -115,7 +127,7 @@ meth_hexes_avg <- meth_hexes %>%
   group_by(index) %>%
   summarise(ch4_mean = mean(ch4_mean, na.rm = TRUE),
             Fch4_mean = mean(Fch4_mean, na.rm = TRUE),
-            ch4_cv = mean(ch4_cv, na.rm = TRUE),
+            ch4_sd = mean(ch4_sd, na.rm = TRUE),
             dry_mean = mean(dry_mean, na.rm = TRUE),
             Jan_ch4 = mean(Jan_ch4, na.rm = TRUE),
             Feb_ch4 = mean(Feb_ch4, na.rm = TRUE),
@@ -225,11 +237,22 @@ meth_fluxes <- read_csv("data/processed/grades_ch4_fluxes.csv", lazy = FALSE) %>
 
 #upscaled methane concentrations
 #mean estimates are "month_ch4", while SD are "month_ch4_sd"
-meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "ch4_preds_uncertainty", full.names = TRUE), read_csv) %>% 
+#we got some modelled meth duplicated for a few sites, we need to clean this.
+meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "ch4_preds_uncertainty", full.names = TRUE), 
+                     read_csv) %>% 
   purrr::reduce(left_join, by = "COMID") %>% 
   rename_with( ~str_replace(.x, "mean", "ch4")) %>% 
-  rename_with( ~str_replace(.x, "se", "ch4_sd")) %>% 
-  dplyr::select(COMID, paste0(month.abb, "_ch4"), paste0(month.abb, "_ch4_sd"))
+  rename_with( ~str_replace(.x, "se", "ch4_sd")) 
+
+#we find those duplicated sites
+dupes <- meth_concs %>% filter(duplicated(.[["COMID"]])) %>% pull(COMID) %>% unique()
+
+#take the first value and ut them back to the df
+meth_concs <- meth_concs %>% 
+  filter(!COMID %in% dupes) %>% 
+  bind_rows(meth_concs %>% 
+              filter(COMID %in% dupes) %>% 
+              summarise(across(everything(), first), .by = "COMID"))
 
 #read coordinates from grades
 grades <- read_csv("data/processed/grades_coords.csv") 
@@ -270,7 +293,7 @@ meth_avg <- meth_gis %>%
           Dec_ch4E = Dec_ch4E_reach + Dec_ch4E_extrap,
           ch4E_year = rowSums(pick(ends_with("reach"))) + rowSums(pick(ends_with("extrap")))
           ) %>% 
-  dplyr::select(COMID, lat, lon, ch4_mean,  Fch4_mean, ch4E_year, Jan_ch4:Dec_ch4, Jan_ch4F:Dec_ch4F, Jan_ch4E:Dec_ch4E) %>%
+  dplyr::select(COMID, lat, lon, ch4_mean,  Fch4_mean, ch4E_year, ends_with("_ch4"), ends_with("_ch4F"), ends_with("_ch4E")) %>%
   st_as_sf( coords = c("lon", "lat"),  crs = 4326)
 
 
@@ -289,7 +312,8 @@ grid <- st_sf(index = 1:length(lengths(grid)), grid)
 #join the meth data to the grid
 meth_hexes <- st_join(meth_avg, grid, join = st_intersects)
 
-  #now aggregate all the meth data for each hex, do means and sum for area.
+#now aggregate all the meth data for each hex, do means for concs and flux rates and sum for emisisons
+#emissions are in Megagrams (Tonne) C, per month or year.
 meth_hexes_avg <- meth_hexes %>% 
   st_drop_geometry() %>%
   group_by(index) %>%
@@ -332,11 +356,12 @@ meth_hexes_avg <- meth_hexes %>%
             Oct_ch4_emissions = sum(Oct_ch4E, na.rm = TRUE)/1e+6,
             Nov_ch4_emissions = sum(Nov_ch4E, na.rm = TRUE)/1e+6,
             Dec_ch4_emissions = sum(Dec_ch4E, na.rm = TRUE)/1e+6) %>%
+  mutate(across(everything(), ~ifelse(.x > quantile(.x, 0.99, na.rm = TRUE), quantile(.x, .99, na.rm = TRUE), .x ))) %>% #there are some extreme values, I cap them
   right_join(grid, by="index") %>%
   st_sf() 
 
 
-
+#export each as separate tif layers
 names_for_tiffs <- names(meth_hexes_avg %>% st_drop_geometry %>% select(-index))
 
 for(i in 1:length(names_for_tiffs)){
@@ -348,14 +373,17 @@ for(i in 1:length(names_for_tiffs)){
   print(paste("done", i))
 }
 
-
+#read them all back to R
+#stack them in one file
 filelist <- list.files("data/processed/GIS/tiffs_out", full.names = TRUE)
 
 all_stacked <- rast(filelist)
 all_stacked
+names(all_stacked)
 
+plot(all_stacked$ch4_emissions_year)
 
-#export all files
+#export all files grouped by categories
 rast(filelist[grepl("_ch4_conc", filelist)]) %>%  
   writeRaster( "data/processed/GIS/final_product/river_methane_concs_monthly.tiff", overwrite=TRUE)
 
@@ -367,7 +395,6 @@ rast(filelist[grepl("_ch4_flux", filelist)]) %>%
 
 rast(filelist[grepl("avg|year", filelist)]) %>% 
   writeRaster( "data/processed/GIS/final_product/river_methane_yearly.tiff", overwrite=TRUE)
-
 
 
 

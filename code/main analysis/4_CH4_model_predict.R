@@ -54,18 +54,18 @@ if(file.exists("data/processed/grade_attributes.csv") == TRUE) {
 global_preds <- read_csv( "data/processed/grade_attributes.csv", lazy=FALSE) 
 
 # we will log transform those to start with
-vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
+vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
                  'T_ESP', "N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture", "q_month",
                  "P_gnpp", "P_background", "P_load", "P_point", "P_surface_runoff_agri", "P_surface_runoff_nat", "N_retention_subgrid")
 
 # Select useful variables for the model, some variables were removed due to a high correlation with other ones 
-variables_to_remove <- c('Site_ID','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",
-                         'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY', "lon", "lat",
-                         'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY",
+variables_to_remove <- c('Site_ID','COMID','GPP_yr', 'S_OC', 'S_PH_H2O', 'S_CEC_SOIL', 'S_BS', 'S_TEB', 'pyearRA', "pyearRH", "T_CEC_CLAY",
+                         'gpp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY', "lon", "lat",  "S_TEB" ,
+                         'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "S_REF_BULK_DENSITY", "S_CEC_CLAY", "S_CEC_SOIL",
                          "N_aquaculture", "N_gnpp", "N_load", "N_point",  "N_surface_runoff_agri", "N_surface_runoff_nat" )
 
 
-
+#pick the names of all variables to log and to remove, is a bit trickier than a string because many have a column for each month
 vars_to_log_glob <-  global_preds %>% 
   select(contains(c("uparea", "popdens", "slop",  "T_OC" ,"T_CACO3", "T_CASO4", "k_", "q_", "gw_", "wetland",   "T_ESP",
                     "N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture", "P_gnpp", 
@@ -75,9 +75,9 @@ vars_to_log_glob <-  global_preds %>%
 
 
 vars_to_remove_glob <-  global_preds %>% 
-  select(contains(c('GPP_yr', 'S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH", "T_ECE", "S_ECE", 
-                    'npp_', 'forest',  'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
-                    'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY", "temp",
+  select(contains(c('GPP_yr', 'S_OC', 'S_PH_H2O', 'S_CEC_SOIL', 'S_BS', 'S_TEB', 'pyearRA', "pyearRH", "T_ECE", "S_ECE", 
+                    'gpp_', 'forest',  'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
+                    'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "S_REF_BULK_DENSITY", "S_CEC_CLAY", "temp",
                     "N_aquaculture", "N_gnpp", "N_load", "N_point", "N_surface_runoff_agri", "N_surface_runoff_nat"),
                   ignore.case = FALSE), lat, lon, slope, area, -temp_yr) %>%
   colnames(.)
@@ -104,11 +104,11 @@ colnames(global_preds_trans)
 #prepare a dataset, nesting by month
 data_model_monthly <- grimeDB_attr_trans %>% 
   group_by(COMID, month) %>% 
-  summarise(across(where(is.numeric), mean)) %>%
+  summarise(across(where(is.numeric), mean),
+            across(where(is.character), first)) %>%
   ungroup() %>% 
   dplyr::select(-all_of(variables_to_remove), COMID) %>% 
   drop_na() %>% 
-  left_join(dplyr::select(grimeDB_attr_trans, COMID, biome_label)) %>% 
   dplyr::select(-COMID)
 
 rm(global_preds, grimeDB_attributes, grimeDB_attr_trans)
@@ -167,6 +167,8 @@ predict_methane <- function(data_model, month, global_predictors) {
     add_recipe(recipe_train) %>%
     fit(data = train_sub) 
 
+  #doing it all at once crashed the computer, so I do it in 10 chunks of the global data
+  #here i set bwhere to break the df in equal bits
   breaks_df <-  head( round(seq(1, nrow(global_predictors), length.out= 9), 0), -1)
   
   preds_all <- tibble(
@@ -174,6 +176,7 @@ predict_methane <- function(data_model, month, global_predictors) {
     mean = NULL,
     se = NULL)
   
+  #then I do the global prediction in a loop based on those breaks
   for(i in seq_along(breaks_df)){
     
     first_slice = breaks_df[i]
@@ -188,19 +191,7 @@ predict_methane <- function(data_model, month, global_predictors) {
       dplyr::select(-ends_with(setdiff(all_months, month_selected))) %>%
       rename_all(~ str_replace(., month_selected, "month"))
     
-    # preds <- predict(fit_wf$fit$fit$fit, 
-    #                  extract_recipe(fit_wf) %>% bake(df_predictors),
-    #                  type = "quantiles",
-    #                  quantiles = c(0.125, 0.5, 0.875)) %>% 
-    #   with(predictions) %>% 
-    #   as_tibble() %>% 
-    #   set_names(paste0(".pred", c("_lower", "", "_upper"))) 
-    # preds_1 <- tibble(COMID = df_predictors$COMID,
-    #                   mean = exp(preds$.pred) - .1,
-    #                   lower = exp(preds$.pred_lower) - .1,
-    #                   upper = exp(preds$.pred_upper) - .1) %>% 
-    #   rename_at(vars(mean, lower, upper),  ~ paste0(month.abb[month], "_" , . ) ) 
-    
+    #predict values using the model for each month
     preds_mod <- predict(fit_wf$fit$fit$fit, 
                          extract_recipe(fit_wf) %>% bake(df_predictors),
                          type = "se",
@@ -212,10 +203,12 @@ predict_methane <- function(data_model, month, global_predictors) {
                       se = exp(preds_mod$se) - .1) %>% 
       rename_at(vars(mean, se),  ~ paste0(month.abb[month], "_" , . ) ) 
     
+    #bind together with the previous files
     preds_all <- bind_rows(preds_all, preds_1)
     print(paste("done", i))
   }
   
+  #export the monthly file for later use
   preds_all %>% 
     write_csv(paste0("data/processed/meth_preds/ch4_preds_uncertainty_", month.abb[month], ".csv" ))
   
@@ -223,16 +216,14 @@ predict_methane <- function(data_model, month, global_predictors) {
 }
 
 
-# Upscale methane globally by month, with uncertainity ----
-
+# Upscale methane globally by month, with uncertainty ----
+#we run month by month
 
 set.seed(123)
 
 gc()
- 
-ch4_jan <- predict_methane(data_model_monthly, 1, global_preds_trans )
-ch4_jan
 
+ch4_jan <- predict_methane(data_model_monthly, 1, global_preds_trans )
 ch4_feb <- predict_methane(data_model_monthly, 2, global_preds_trans)
 ch4_mar <- predict_methane(data_model_monthly, 3, global_preds_trans)
 ch4_apr <- predict_methane(data_model_monthly, 4, global_preds_trans)

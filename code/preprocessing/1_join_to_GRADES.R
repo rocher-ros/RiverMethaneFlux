@@ -21,13 +21,30 @@ lapply(package_list, require, character.only = TRUE)
 
 # Download files ----
 
-# Download the Global River Methane Database (GRiMeDB) from doi: xxxx 
+# Download the Global River Methane Database (GRiMeDB) from doi: https://doi.org/10.6073/pasta/b7d1fba4f9a3e365c9861ac3b58b4a90
+## Pack GRiMeDB into a .rda file ----
 
+path_grime <- "/Users/gdro0001/Downloads/knb-lter-ntl.420.1" # Put the path wherever you have downloaded GRiMeDB
+
+sites_df <- read_csv(file.path(path_grime, "GRiMe_sites.csv"))
+papers_df <- read_csv(file.path(path_grime, "GRiMe_sources.csv"))
+conc_df <- read_csv(file.path(path_grime, "GRiMe_concentrations.csv"))
+flux_df <- read_csv(file.path(path_grime, "GRiMe_fluxes.csv"))
+
+save(papers_df, sites_df, conc_df, flux_df,
+     file = paste0("data/", "GRiMeDB.rda")) 
 
 #load the methane DB 
 load(file.path("data", "GRiMeDB.rda"))
 
+#Note on 2023-05-25:  GRADES database has moved to a google drive and the follow routing no longer works. 
+# Best option is to go to the google drive and download directly into a folder in the grades subdirectory of this project
+# Link to the google drive: https://drive.google.com/drive/folders/1yYjAIA3QCPBshoRSsIi9YV2jjegUkDwW?usp=share_link
+# Link to GRADES homepage: https://www.reachhydro.org/home/records/grades 
+#Alternatively, you can contact me for a copy of the files used in this analysis: g.rocher.ros@gmail.com 
+
 ## Prepare the things for the download of GRADES ----
+
 dir.create("data/raw/grades")
 
 url = "http://hydrology.princeton.edu/data/mpan/MERIT_Basins/MERIT_Hydro_v00_Basins_v01/level_01/"

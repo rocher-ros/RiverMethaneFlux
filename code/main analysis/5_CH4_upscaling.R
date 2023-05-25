@@ -1,8 +1,11 @@
 ########################################.
 #### Script upscale CH4 emissions in rivers globally.
-#### Author:  Gerard Rocher-Ros, modified from Shaoda Liu
-#### Last edit: 2022-09-10
+#### Author:  Gerard Rocher-Ros, modified from  the procedure by Shaoda Liu : https://github.com/lsdeel/globalRiverCO2emission
+#### Last edit: 2023-05-10
+#### Current setup reproduces the results with the footprint flux correction. 
+#### Code to reproduce other corrections is disabled so you need to read through and comment/uncomment specific lines
 ########################################.
+
 
 # Load  and install packages and functions ----
 # List of all packages needed
@@ -18,7 +21,7 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 lapply(package_list, require, character.only = TRUE)
 
 
-# Function to calculate gas saturation, 
+# Function to calculate gas saturation, #adapted from:  https://github.com/lukeloken/GlobalRiverMethane/blob/master/R/convert_unit_functions.R
 # from temperature ( in Kelvin) and atm pressure (derived from elevation (in m.a.s.l) for CH4 
 # Henry's Law constants from http://www.henrys-law.org
 # Temperature correction using van't Hoff equation , temperature is in (Kelvin)
@@ -50,11 +53,22 @@ hydro_k <- read_csv("data/processed/q_and_k.csv") #%>%
 
 #upscaled methane concentrations
 #mean estimates are "month_ch4", while SD are "month_ch4_sd"
+#we got some modelled meth duplicated for a few sites, we need to clean this.
 meth_concs <- lapply(list.files(path = "data/processed/meth_preds/", pattern = "ch4_preds_uncertainty", full.names = TRUE), 
                      read_csv) %>% 
   purrr::reduce(left_join, by = "COMID") %>% 
   rename_with( ~str_replace(.x, "mean", "ch4")) %>% 
   rename_with( ~str_replace(.x, "se", "ch4_sd")) 
+
+#we find those duplicated sites
+dupes <- meth_concs %>% filter(duplicated(.[["COMID"]])) %>% pull(COMID) %>% unique()
+
+#take the first value and ut them back to the df
+meth_concs <- meth_concs %>% 
+  filter(!COMID %in% dupes) %>% 
+  bind_rows(meth_concs %>% 
+              filter(COMID %in% dupes) %>% 
+              summarise(across(everything(), first), .by = "COMID"))
 
 gc()
 
@@ -487,7 +501,8 @@ df <- df %>%
   filter(!HYBAS_ID %in% c("1040040050","2040059370","5040055420"),
          !is.na(Apr_k)) #basins have no valid rivArea
 
-q_to_vel <- function(q){
+#aproximate velocity and depth from discharge using scaling relationships from Raymond et al. 2012 L&O FE
+q_to_vel <- function(q){ 
   exp(0.12 * log(q) - 1.06)
 }
 
@@ -566,47 +581,6 @@ df <- df %>%
 #total number of sites corrected
 df %>% 
   summarise(frac_corrected = sum(ifelse(footprint_correction > 1, 1, 0))/n()*100)
-
-df %>% 
-  mutate(k_uncorrected = (2841 * Slope * q_to_vel(yeaQmean) + 2.02),
-         k_corrected = (3*3600*24*q_to_vel(yeaQmean)*q_to_depth(yeaQmean))/(Length)) %>% 
-  filter(footprint_correction > 1) %>% 
-  ggplot(aes(k_uncorrected, k_corrected, color= Slope))+
-  geom_point()+
-  geom_abline(slope =1, intercept = 0)+
-  scale_color_viridis_c(trans = "sqrt")
-
-df %>% 
-  mutate(k_uncorrected = (2841 * Slope * q_to_vel(yeaQmean) + 2.02),
-         k_corrected = (3*3600*24*q_to_vel(yeaQmean)*q_to_depth(yeaQmean))/(Length),
-         k_diff = (k_corrected - k_uncorrected)/k_uncorrected*100) %>% 
-  filter(footprint_correction > 1) %>% 
-  ggplot()+
-  geom_density(aes(k_diff))+
-  geom_vline(aes(xintercept = median(k_diff)))
-  
-  
-
-df %>% 
-  mutate(slope_cat = case_when(Slope < .001 ~ "< 0.001",
-                               Slope >= .001 & Slope < .01 ~ "0.001 - 0.01",
-                               Slope >= .01 & Slope < .1 ~ "0.01 - 0.1",
-                               Slope >= .1 & Slope < .2 ~ "0.1 - 0.2",
-                               Slope >= 0.2 ~ "> 0.2") %>% 
-           as_factor() %>% 
-           fct_relevel("< 0.001", "0.001 - 0.01", "0.01 - 0.1","0.1 - 0.2", "> 0.2"),
-         footprint_corrected = ifelse(footprint_correction > 1, 1, 0)) %>% 
-  group_by(slope_cat) %>% 
-  summarise(foot_corr = sum(footprint_corrected)/n(),
-            n= n()) %>% 
-  ggplot(aes(slope_cat, foot_corr*100))+
-  scale_y_continuous(expand = c(0,0), limits = c(0,40))+
-  geom_col()+
-  theme_classic()+
-  labs(x=" River reach slope categories", y = "% of reaches corrected")
-
-
-#ggsave("figures/supplementary/footprints_reach_slopes.png")
 
 #stats to cap fluxes at 2 SD, uncoment to do that 
 #main_stats <- df %>%
@@ -818,30 +792,21 @@ total_fluxes %>%
 ## Uncorrected ----- 14.6
 
 
-
-
 ## Export file ----
-
-#Some stuff got duplicated, fixing them
-dupes <- total_fluxes %>%   filter(duplicated(.[["COMID"]])) %>% pull(COMID) %>% unique()
 
 
 total_fluxes %>% 
-  filter(!COMID %in% dupes) %>% 
-  bind_rows(total_fluxes %>% 
-              filter(COMID %in% dupes) %>% 
-              summarise(across(everything(), first), .by = "COMID")) %>% 
   select(COMID:Dec_ch4F, Jan_ch4F_cv:Dec_ch4E_reach, Jan_ch4E_extrap:Dec_ch4E_extrap,
          Jan_area_m2:Dec_ephemarea_m2, Jan_iceCov:Dec_iceCov, Jantimedryout:Dectimedryout ) %>% 
   write_csv( "data/processed/grades_ch4_fluxes.csv")
 
 
-#TABLE for the SM
+#TABLE S1 for the SM
 df %>% 
   group_by(strmOrder) %>% 
   summarise(n = n(),
-            width = median(yeaWidth),
-            length = median(Length),
+            width_m = median(yeaWidth),
+            length_m = median(Length),
             slope = mean(Slope)) %>% 
   arrange(strmOrder)
 

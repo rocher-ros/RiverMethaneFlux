@@ -46,20 +46,19 @@ grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attribut
 colnames(grimeDB_attributes)
 
 # file to have nicer names in the variables, to use later
-labeller_vars <- read_csv("data/processed/variables_names.csv") #%>% 
-  #mutate(label=str_replace(label, "9", ";"))
+labeller_vars <- read_csv("data/processed/variables_names.csv") 
 
 # 2. Explore the raw data and process before the modelling ----
 
 # we will log transform those to start with
-vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
+vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
                  'T_ESP',"N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture", "q_month",
                  "P_gnpp", "P_background", "P_load", "P_point", "P_surface_runoff_agri", "P_surface_runoff_nat", "N_retention_subgrid")
 
 # Select useful variables for the model, some variables were removed due to a high correlation with other ones 
-variables_to_remove <- c('Site_ID','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",  "S_PH_H2O",
-                         'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY', "lon", "lat",  "S_TEB" ,
-                         'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY", "T_CEC_SOIL",
+variables_to_remove <- c('Site_ID','COMID','GPP_yr', 'S_OC', 'S_PH_H2O', 'S_CEC_SOIL', 'S_BS', 'S_TEB', 'pyearRA', "pyearRH", "T_CEC_CLAY",
+                         'gpp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY', "lon", "lat",  "S_TEB" ,
+                         'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "S_REF_BULK_DENSITY", "S_CEC_CLAY", "S_CEC_SOIL",
                          "N_aquaculture", "N_gnpp", "N_load", "N_point",  "N_surface_runoff_agri", "N_surface_runoff_nat" )
 
 
@@ -256,7 +255,7 @@ predict_RF_grime <- function(df) {
 }
 
 ## Run the model via map for each month ----
-set.seed(12345)
+set.seed(123)
 
 
 # Now finally run the model for each month, using data of adjacent months for each month
@@ -293,7 +292,6 @@ labelled_months <- tibble(month_label = tolower(month.abb), labels = month.name)
 
 #extract the model prediction data for plotting model performance
 monthly_models_unnested <- monthly_models %>% 
-  mutate(month_label = fct_relevel(month_label, levels = toupper(month.abb))) %>% 
   unnest(preds)  %>% 
   left_join(labelled_months, by = "month_label") %>% 
   mutate(labels = fct_relevel(labels, month.name)) 
@@ -302,59 +300,54 @@ monthly_models_unnested <- monthly_models %>%
 rms_text <- monthly_models_unnested %>% 
   group_by(labels) %>% 
   summarise(rmse = exp(sqrt(mean((Log_CH4mean - .pred)^2))) - 0.1 ) %>% 
-  mutate(rms_label = paste("RMSE = ", round(rmse, 2) ))
+  mutate(rms_label = paste("RMSE=", round(rmse, 2) ))
 
 # plot model predictions vs observation of the testing dataset  
-ggplot(monthly_models_unnested, aes(exp(.pred), exp(Log_CH4mean)))+
+obs_pred_plot <- ggplot(monthly_models_unnested, aes(exp(.pred), exp(Log_CH4mean)))+
   geom_point(alpha=.6)+
   geom_abline(slope=1, intercept = 0)+
   geom_text( data = rms_text,
-             mapping = aes(x = 20, y = .6, label =rms_label), family = "Helvetica")+
-  stat_cor(aes(label = ..rr.label..), label.y.npc = 0.1, label.x = 0.8)+ #put R2 and label
-  labs(x = "**CH<sub>4</sub> predictions**<br>(mmol m<sup>-3</sup>)", 
-       y = "**CH<sub>4</sub> observations** <br>(mmol m<sup>-3</sup>)")+
+             mapping = aes(x = 20, y = .6, label =rms_label), family = "Helvetica", size= 2.5)+
+  stat_cor(aes(label = ..rr.label..), label.y.npc = 0.1, label.x = 0.8, size=2.5)+ #put R2 and label
+  labs(x = "**CH<sub>4</sub> predictions** (mmol m<sup>-3</sup>)", 
+       y = "**CH<sub>4</sub> observations** (mmol m<sup>-3</sup>)")+
   scale_y_log10(labels=scales::number, limits=c(0.1, 200))+
   scale_x_log10(labels=scales::number, limits=c(0.1, 200))+
-  facet_wrap(~labels, ncol = 3)+
+  facet_wrap(~labels, ncol = 6)+
   theme_bw()+
   theme(#text = element_text(family = "Helvetica"),
-    axis.title.y = ggtext::element_markdown(),
-    axis.title.x = ggtext::element_markdown(),
+    axis.title.y = ggtext::element_markdown(size= 9),
+    axis.title.x = ggtext::element_markdown(size= 9),
+    axis.text = element_text(size=7),
     strip.background = element_rect(fill="white"),
-    strip.text = element_text(size=12))
+    strip.text = element_text(size=9))
 
 
-ggsave(filename= "figures/supplementary/model_perf_monthly.png", width = 9, height = 8)
+#ggsave(filename= "figures/supplementary/model_perf_monthly.png", width = 9, height = 8)
 
 #residuals vs predictions
-ggplot(monthly_models_unnested, aes(.pred, Log_CH4mean - .pred))+
+resid_plot <- ggplot(monthly_models_unnested, aes(exp(.pred), Log_CH4mean - .pred))+
   geom_point(alpha = .6)+
   geom_hline(yintercept = 0, linetype = 1)+
-  labs(x = "**CH<sub>4</sub> predictions**<br>log(mmol m<sup>-3</sup>)", 
-       y = "**Residuals** <br>log(mmol m<sup>-3</sup>)")+
-  facet_wrap(~labels, ncol = 3)+
+  labs(x = "**CH<sub>4</sub> predictions** (mmol m<sup>-3</sup>)", 
+       y = "**Residuals** log(mmol m<sup>-3</sup>)")+
+  scale_x_log10(labels=scales::number, limits=c(0.1, 200))+
+  facet_wrap(~labels, ncol = 6)+
   theme_bw()+
   theme(text = element_text(family = "Helvetica"),
-        axis.title.y = ggtext::element_markdown(),
-        axis.title.x = ggtext::element_markdown(),
+        axis.title.y = ggtext::element_markdown(size= 9),
+        axis.title.x = ggtext::element_markdown(size= 9),
+        axis.text = element_text(size=7),
         strip.background = element_rect(fill="white"),
-        strip.text = element_text(size=12))
+        strip.text = element_text(size=9))
+
+obs_pred_plot + resid_plot +
+  plot_layout(nrow = 2) +
+  plot_annotation(tag_levels = 'a') &
+  theme(plot.tag.position = c(0.01, .99))
 
 
-
-ggsave(filename= "figures/supplementary/model_residuals_monthly.png", width = 9, height = 8)
-
-#residuals plot for each month
-ggplot(monthly_models_unnested, aes( x=Log_CH4mean-.pred))+
-  geom_density(alpha = .6, fill= "gray60")+
-  labs( x = "**Residuals** <br>log(mmol m<sup>-3</sup>)")+
-  facet_wrap(~labels, ncol = 3)+
-  theme_bw()+
-  theme(axis.title.y = ggtext::element_markdown(),
-        axis.title.x = ggtext::element_markdown(),
-        strip.background = element_rect(fill="white"),
-        strip.text = element_text(size=12))
-
+ggsave(filename= "figures/supplementary/extended_data2.jpeg", width = 183, height = 140, dpi = 300, units = "mm")
 
 
 
@@ -396,14 +389,16 @@ vi_monthly_mean <- vi_monthly %>%
 #plot for the variable imporantance
 vi_plot <- ggplot(vi_monthly, aes(x = Importance, y = reorder(label, sqrt(Importance), FUN = mean)))+
   stat_summary( aes(fill = type), color=NA, geom="bar", fun="mean", alpha=.8)+
-  stat_summary(fun.data = mean_sd, geom = "linerange", size=1.5, alpha=.6)+
+  stat_summary(fun.data = mean_sd, geom = "linerange", linewidth=1.5, alpha=.6)+
   scale_x_continuous(expand = c(0,0), trans = "sqrt")+
   scale_fill_manual(values=c("forestgreen", "dodgerblue3","brown3", "darkgoldenrod3", "gray60", "chocolate"), name="Category")+ #
   theme_classic()+
   labs(y="", fill="Category")+
-  theme(legend.position = c(.9,.12), 
+  theme(legend.position = c(.93,.15), 
         text = element_text(family = "Helvetica"),
-        axis.text.y =ggtext::element_markdown(family = "Helvetica", size= 10), 
+        axis.title.x = element_text(size= 11),
+        axis.text = element_text(size= 10),
+        axis.text.y =ggtext::element_markdown(family = "Helvetica", size= 11), 
         legend.title =element_text(face="bold", size = 12),
         legend.text = element_text(size= 11))
 
@@ -504,8 +499,9 @@ othersites_plot <-
   theme_classic()+
   theme(legend.position = "none", 
         text = element_text(family = "Helvetica"),
-        axis.title.x = ggtext::element_markdown(),
-        axis.text.y = ggtext::element_markdown(size= 10),
+        axis.text.x = element_text(family = "Helvetica", size= 10),
+        axis.title.x = ggtext::element_markdown(size= 11),
+        axis.text.y = ggtext::element_markdown(size= 11),
         panel.background = element_rect(fill = "transparent"), # bg of the panel
         plot.background = element_rect(fill = "transparent", color = NA)) # bg of the plot
 
@@ -545,7 +541,11 @@ plots_combined <- vi_pdp_plot +
   plot_annotation(tag_levels = list(c('a', '', '', 'b'))) & 
   theme(plot.tag.position = c(0.1, 1), plot.tag = element_text(size=16))
 
-ggsave("figures/variables_jitter.png", plot = plots_combined, height = 9, width = 9.5, dpi=500)  
+#ggsave("figures/variables_jitter.png", plot = plots_combined, height = 9, width = 9.5, dpi=500)  
+
+#production_quality figure
+ggsave("figures/figure3.pdf", plot = plots_combined, scale = 1.4, 
+       height = 150, width = 183, units = "mm")  
 
 
 ##Figure only of the partial dependence, for the supplementary materials
@@ -584,10 +584,10 @@ vars_to_log_glob <-  global_preds %>%
 
 
 vars_to_remove <-  global_preds %>% 
-  select(contains(c('GPP_yr', 'S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH", "T_ECE", "S_ECE", 
-                    'npp_', 'forest',  'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY',
-                    'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY", "temp",
-                    "N_aquaculture", "N_gnpp", "N_load", "N_point", "N_surface_runoff_agri", "N_surface_runoff_nat"),
+  select(contains(c('Site_ID','GPP_yr', 'S_OC', 'S_PH_H2O', 'S_CEC_SOIL', 'S_BS', 'S_TEB', 'pyearRA', "pyearRH", "T_CEC_CLAY",
+                    'gpp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY', "lon", "lat",  "S_TEB" ,
+                    'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "S_REF_BULK_DENSITY", "S_CEC_CLAY", "S_CEC_SOIL",
+                    "N_aquaculture", "N_gnpp", "N_load", "N_point",  "N_surface_runoff_agri", "N_surface_runoff_nat" ),
                   ignore.case = FALSE), lat, lon, slope, area, -temp_yr, -biome_label) %>%
   colnames(.)
 
@@ -605,7 +605,7 @@ rm(global_preds, grimeDB_attributes)
 gc()
 
 
-# 
+# function to assess spatial extrapolaiton of data, see GRiMeDB data paper (Stanley et al. 2023) for a more detailed description
 assess_spatial_extrapolation <- function(df_sampled, df_global, month, plot_the_space){
   
   

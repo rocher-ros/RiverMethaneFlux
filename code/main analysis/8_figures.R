@@ -18,12 +18,31 @@ if(length(packages_missing) >= 1) install.packages(packages_missing)
 # Now load all the packages
 lapply(package_list, require, character.only = TRUE)
 
+#custom functions ----
+# Function to calculate gas saturation, 
+# from temperature ( in Kelvin) and atm pressure (derived from elevation (in m.a.s.l) for CH4 
+# Henry's Law constants from http://www.henrys-law.org
+# Temperature correction using van't Hoff equation , temperature is in (Kelvin)
+# Kh is in ("Kh, cp") = (mol/L/Atm) at STP
+# Concentrations (mole fraction, also ppmv) in the atmosphere are approximate for 2013, should be updated over time
+# AtmP is in (atmospheres)
+get_Ch4eq <- function(temperature, elevation){
+  
+  pressure <- (1-(.0000225577*elevation))^5.25588
+  Kh <- (1.4*10^-3)*exp(1700*((1/temperature)-(1/298)))
+  AtmosphereConc <-  1.83
+  EquilSaturation <- AtmosphereConc*Kh*pressure #umol/L, mmol/m3
+  
+  return(EquilSaturation)
+}
+
+
 
 # Load files ----
 # aggregated hex layers
 
 meth_hexes_avg <- st_read( "data/processed/GIS/meth_hexes_footprint_corr.shp") %>%
-  mutate(Fch4_mean = ifelse(Fch4_mean > .11, NA, Fch4_mean) ) %>% 
+  mutate(Fch4_mean = ifelse(Fch4_mean > .11, NA, Fch4_mean) ) %>% #there is a super tiny hex in Svalvard that gets a high value, due to the aggregation, i remove it
   st_transform("+proj=eqearth +wktext") 
 
 meth_hexes_flux_corr <- st_read( "data/processed/GIS/meth_hexes_flux_corr.shp") %>%
@@ -67,6 +86,49 @@ meth_gis <- meth_fluxes %>%
 
 rm(meth_fluxes, grades)
 
+# get the modelled k values 
+# load file with discharge and k data 
+hydro_k <- read_csv("data/processed/q_and_k.csv") %>% 
+  dplyr::select(COMID, Slope, ends_with("k")) %>% 
+  mutate( k_mean = rowMeans(pick(ends_with("k")), na.rm = TRUE))
+
+#do average methane fluxes rates
+meth_avg <- meth_gis %>% 
+  left_join(hydro_k %>%  dplyr::select(COMID, Slope, k_mean), by = "COMID") %>% 
+  drop_na(Jan_ch4F) %>% 
+  mutate(Fch4_mean = rowMeans(pick(ends_with("ch4F")), na.rm = TRUE)) %>% 
+  dplyr::select(COMID, Slope, k_mean, Fch4_mean )
+
+
+## Now get GRiMeDB 
+load(file.path("data", "GRiMeDB.rda"))
+
+sites_df <- sites_df %>% 
+  mutate(Channel_type = ifelse(is.na(Channel_type) == TRUE, "normal", Channel_type)) 
+
+grime_comids <- read_csv("data/processed/sites_meth_comid.csv") 
+
+
+
+# join the flux with concentration and the site dataset, also calcute some variables we need for the temperature dependence
+# for that we need the boltzmann constant
+
+boltzmann_k <- 8.62e-5
+
+flux_sites <- flux_df %>% 
+  left_join( conc_df, by=c("Site_ID", "Date_start"), multiple = "all") %>% 
+  left_join( sites_df, by="Site_ID") %>% 
+  filter(Aggregated == "No", WaterTemp_degC < 100, 
+         !Channel_type %in% c("DD","GT", "PS", "TH","Th", "CAN")) %>%
+  mutate(WaterTemp_best = ifelse(is.na(WaterTemp_degC) == TRUE, WaterTemp_degC_estimated, WaterTemp_degC) ) %>% 
+  drop_na(Diffusive_CH4_Flux_Mean, WaterTemp_best ) %>% 
+  mutate(site_lat = paste("Site:",Site_ID,"\nLat: " , round(Latitude,1), sep=""), #make a new variables that has site id and latitude
+         temp_inv = 1/(boltzmann_k*(WaterTemp_best + 273.15)), #inverse of temperature with boltzmann constant
+         temp_stand = 1/(boltzmann_k*288.15) - 1/(boltzmann_k*(WaterTemp_best + 273.15)))  #and the same but standrdadized at 15 degC which keeps things more straight
+
+#sort by latitude for later plots
+flux_sites$site_lat <- reorder(flux_sites$site_lat, desc(flux_sites$Latitude))
+
 #download world map
 world <-  ne_download(scale = 110, type = 'land', category = 'physical', returnclass = "sf") %>%
   st_transform("+proj=eqearth +wktext") 
@@ -98,6 +160,7 @@ buffers <- meth_hexes_avg %>%
 
 
 
+
 # Map figures ----
 ## map of concentrations 
 map_ch4 <- 
@@ -116,10 +179,10 @@ map_ch4 <-
   theme(text = element_text(family = "Helvetica"),
         legend.position = c(0.125, 0.35),
         legend.direction = "vertical",
-        legend.title = ggtext::element_markdown(size = 10),
-        legend.text = element_text(size=9),
-        legend.key.height  = unit(.5, 'cm'),
-        legend.key.width =  unit(.3, 'cm'))
+        legend.title = ggtext::element_markdown(size = 8),
+        legend.text = element_text(size =7 ),
+        legend.key.height  = unit(.35, 'cm'),
+        legend.key.width =  unit(.25, 'cm'))
 
 
 ## map of fluxes
@@ -140,9 +203,10 @@ map_fch4 <-
         text = element_text(family = "Helvetica"),
         legend.position = c(0.1, 0.35),
         legend.direction = "vertical",
-        legend.title = element_markdown(size = 10),
-        legend.key.height  = unit(.5, 'cm'),
-        legend.key.width =  unit(.3, 'cm'))
+        legend.title = ggtext::element_markdown(size = 8),
+        legend.text = element_text(size =7 ),
+        legend.key.height  = unit(.35, 'cm'),
+        legend.key.width =  unit(.25, 'cm'))
 
 
 #put them together and add labels
@@ -152,34 +216,37 @@ maps_combined <- map_ch4 +
   plot_layout(ncol = 1) & 
   theme(plot.tag.position = c(0.03, 1))
 
-ggsave(maps_combined, filename = "figures/fig_maps.png", dpi= 1000, scale = .8)
+#ggsave(maps_combined, filename = "figures/fig_maps.png", dpi= 1000, scale = .8)
+
+#export publication quality figure 
+ggsave(maps_combined, filename = "figures/figure1.pdf", width= 120, height= 130,  units= "mm")
 
 
-# Map of the CV of concentrations ----
-#map of CV of concentrations
-map_ch4_cv <- 
+# Map of the ss of concentrations ----
+#map of sd of concentrations
+map_ch4_sd <- 
 ggplot() +
   geom_sf(
     data = meth_hexes_avg, color = NA,
-    aes( fill = ch4_cv) )+
+    aes( fill = ch4_sd) )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
     direction = -1,
     #trans = "pseudo_log", 
-    name = "**CV of <br> predicted CH<sub>4</sub>** <br>(%)")+
+    name = "**SD of <br> predicted CH<sub>4</sub>** <br>(mmol m<sup>-3</sup>)")+
   guides( fill = guide_colourbar(title.position = "top"))+
   coord_sf(xlim = c(-16000000, 16000000), ylim = c(-7300000, 8600000), expand = FALSE) +
   theme_void()+
   theme(text = element_text(family = "Helvetica"),
         legend.position = c(0.17, 0.35),
         legend.direction = "vertical",
-        legend.title = ggtext::element_markdown(),
-        legend.key.height  = unit(.6, 'cm'),
-        legend.key.width =  unit(.4, 'cm'))
+        legend.title = ggtext::element_markdown(size= 9),
+        legend.key.height  = unit(.5, 'cm'),
+        legend.key.width =  unit(.3, 'cm'))
 
 
-ggsave(map_ch4_cv, filename = "figures/supplementary/fig_maps_uncertainty.png", dpi= 1000, scale = .8)
+ggsave(map_ch4_cv, filename = "figures/supplementary/extended_data4.jpeg", width = 183, height = 140, dpi = 300, units = "mm")
 
 
 # Monthly maps ----
@@ -227,14 +294,15 @@ map_monthly <-
   theme(text = element_text(family = "Helvetica"),
         legend.position = "bottom",
         legend.direction = "horizontal",
-        legend.title = ggtext::element_markdown(size = 16),
-        legend.key.width =  unit(2, 'cm'),
-        legend.text = element_text(size = 13),
-        strip.text = element_text( size = 19))
+        legend.title = ggtext::element_markdown(size = 10),
+        legend.key.width =  unit(1, 'cm'),
+        legend.key.height =  unit(.3, 'cm'),
+        legend.text = element_text(size = 9),
+        strip.text = element_text( size = 11))
 
 
 ggsave(map_monthly, 
-       filename = "figures/supplementary/map_ch4_monthly.png", dpi= 1500, height = 10, width = 12)
+       filename = "figures/supplementary/extended_data3.jpeg", width = 183, height = 140, dpi = 900, units = "mm")
 
 
 
@@ -251,6 +319,11 @@ extrap_pols_monthly <- extrap_pols %>%
   drop_na(extrap) %>% 
   st_sf()
 
+n_month <- grimeDB_attributes %>% 
+  st_drop_geometry() %>% 
+  group_by(labels= month) %>% 
+  summarise(n= n() ) %>% 
+  mutate(labels = fct_relevel(labels, month.name))
 
 map_extrap_areas <- 
   ggplot(extrap_pols_monthly)+
@@ -258,14 +331,16 @@ map_extrap_areas <-
   geom_sf(data = world, fill = NA, color = "gray50")+
   geom_sf(fill = "brown4", color = NA)+
   geom_sf(data = grimeDB_attributes %>% 
-            mutate(labels = as_factor(month) %>% fct_relevel(month.name)), color="black", size = 1)+
+            mutate(labels = as_factor(month) %>% fct_relevel(month.name)), color="black", size = .5)+
+  geom_text( data = n_month,
+             mapping = aes(x = 2500000, y = -5500000, label =n), family = "Helvetica", size= 3)+
   coord_sf(xlim = c(-13000000, 16000000), ylim = c(-7600000, 8300000), expand = FALSE)+
   facet_wrap( ~ labels, ncol = 3)+
   theme_void()+
-  theme(strip.text = element_text( size = 19))
+  theme(strip.text = element_text( size = 11))
 
 ggsave(map_extrap_areas, 
-       filename = "figures/supplementary/map_extrap_monthly.png", dpi = 1500, height = 10, width = 12)
+       filename = "figures/supplementary/extended_data1.jpeg", width = 183, height = 140, dpi = 500, units = "mm")
 
 
 
@@ -341,7 +416,7 @@ season_lat_plot <-
   seasonal_df_long %>% 
   ggplot(aes(month, ch4E, fill=areakm2))+
   geom_col()+
-  scale_y_continuous(trans = "sqrt", breaks = c(0, 0.04, .2, 0.4), 
+  scale_y_continuous(trans = "sqrt", breaks = c(0, 0.1, 0.3), 
                      limits = c(0, NA) , expand=c(0,0))+
   scale_fill_viridis_c(trans="log10", direction = -1)+
   facet_wrap(~lat_label, ncol = 1, strip.position = "right")+
@@ -350,17 +425,18 @@ season_lat_plot <-
   theme(axis.ticks.length.x = unit(0, "cm"),
         strip.background = element_blank(),#element_rect(color=NA, fill = "gray80"),
         strip.text.y = element_blank(), #element_text(size = 12, angle=0),
-        axis.text.x = element_text(size = 12, color = "gray5"),
-        axis.text.y = element_text(color = "gray40"),
-        panel.border =  element_rect(color="gray70"), 
+        axis.text.x = element_text(size = 6, color = "gray5"),
+        axis.text.y = element_text(size= 4, color = "gray40"),
+        panel.border =  element_blank(), 
         panel.grid = element_blank(),
-        axis.line.y = element_line(color="gray70"),
-        axis.ticks.y = element_line(color="gray70"),
-        axis.title.y = ggtext::element_markdown(size = 12),
-        legend.title = ggtext::element_markdown(size = 12),
-        legend.position = c(.5,-.065), legend.direction = "horizontal",
-        legend.key.width = unit(1.3, "cm"), legend.key.height = unit( .3, "cm"),
-        plot.margin = unit(c(0,180,40,0), "pt")
+        axis.line.y = element_line(color="gray50", linewidth = .2),
+        axis.ticks.y = element_line(color="gray50", linewidth = .2),
+        axis.title.y = ggtext::element_markdown(size = 8),
+        legend.title = ggtext::element_markdown(size = 7),
+        legend.text = element_text(size = 5),
+        legend.position = c(.5,-.15), legend.direction = "horizontal",
+        legend.key.width = unit(7, "mm"), legend.key.height = unit( 2, "mm"),
+        plot.margin = unit(c(0,0,1,0), "mm")
   )
 
 #make a plot of total emissions by latitudanl bands
@@ -376,27 +452,32 @@ total_lats <-
   scale_x_continuous(expand = c(0,0), breaks = c(0,1,2))+
   labs(x = "**CH<sub>4</sub> emissions** <br> (Tg CH<sub>4</sub>)", y="")+
   theme_classic()+
-  theme(axis.ticks.length.y = unit(0, "cm"),
+  theme(axis.ticks.length.y = unit(0, "mm"),
         #axis.text.y = element_blank(),
-        axis.text.y = element_text(size=12, color="black"),
-        axis.text.x = element_text(size=12),
-        axis.line.x = element_line(color="gray70"),
+        axis.text.y = element_text(size=6, color="black"),
+        axis.text.x = element_text(size=6),
+        axis.line.x = element_line(color="gray40", linewidth = .2),
+        axis.ticks.x = element_line(color="gray40", linewidth = .2),
         axis.line.y = element_blank(),
-        axis.title.x = ggtext::element_markdown(size = 12, color="black"),
-        legend.title = ggtext::element_markdown(size = 12),
+        axis.title.x = ggtext::element_markdown(size = 8, color="black"),
         panel.background = element_rect(fill = "transparent"), # bg of the panel
-        plot.background = element_rect(fill = "transparent", color = NA) # bg of the plot
+        plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+        plot.margin = unit(c(0,0,0,0), "mm")
   )
 
 # put them together and save them
-season_lat_plot +  inset_element(total_lats, left = .97, right = 1.4, bottom = -.118, top = 1.02)
+#figure_2 <- season_lat_plot +  inset_element(total_lats, left = .97, right = 1.4, bottom = -.118, top = 1.02)
+figure_2 <- season_lat_plot + total_lats + plot_layout(ncol = 2, widths = c(3, 1))
 
-ggsave("figures/emissions_lat_season.png", width =8, height = 8, dpi = 800)
+figure_2
+#ggsave("figures/emissions_lat_season.png",figure_2, width =8, height = 8, dpi = 800)
+
+#export of production quality figures 
+ggsave( "figures/figure2.pdf", figure_2,  width =120, height = 85, units = "mm")
 
 
-
+## Figure about the footprint correction of the flux rates -----
 #Map alternatives of flux estimates, with capping k, capping with fluxes, correcting k by footprint and uncorrected
-
 ## map of fluxes
 map_footprint <- 
   ggplot()+
@@ -405,20 +486,20 @@ map_footprint <-
     aes(fill = Fch4_mean*16/12), color = NA )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   geom_sf(data = mountains, fill = NA, color= "gray50", size= .2)+
-  annotate("text", x = 3000000, y = -6000000, label = expression("Total flux = 13.4 Tg "~CH[4]~yr^-1 ), size= 3 )+
+ # annotate("text", x = 3000000, y = -6000000, label = expression("Total flux = 13.4 Tg "~CH[4]~yr^-1 ), size= 3 )+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
-    direction = -1,
-    name = "**CH<sub>4</sub> flux** <br> (g CH<sub>4</sub> m^-2 d<sup>-1</sup>)")+
+    direction = -1, breaks= c(0, 0.05, 0.1),
+    name = "**CH<sub>4</sub> flux** (g CH<sub>4</sub> m^-2 d<sup>-1</sup>)")+
   coord_sf(xlim = c(-15000000, 16000000), ylim = c(-8600000, 8600000), expand = FALSE) +
   guides( fill = guide_colourbar(title.position = "top"))+
-  labs(title = "k corrected for reach footprint")+
+ # labs(title = "Reach footprint correction")+
   theme_void()+
-  theme(legend.position = c(0.125, 0.35),
-        legend.direction = "vertical",
-        legend.title = ggtext::element_markdown(size = 10),
-        legend.key.height  = unit(.5, 'cm'),
-        legend.key.width =  unit(.3, 'cm'),
+  theme(legend.position = c(0.5, -0.2),
+        legend.direction = "horizontal",
+        legend.title = ggtext::element_markdown(size = 8),
+        legend.key.height  = unit(.2, 'cm'),
+        legend.key.width =  unit(.65, 'cm'),
         plot.title = element_text(hjust = .5))
 
 map_k_capped <- 
@@ -428,21 +509,22 @@ map_k_capped <-
     aes(fill = Fch4_mean*16/12), color = NA )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   geom_sf(data = mountains, fill = NA, color= "gray50", size= .2)+
-  annotate("text", x = 3000000, y = -6000000, label = expression("Total flux = 11.8 Tg "~CH[4]~yr^-1 ), size= 3 )+
+ # annotate("text", x = 3000000, y = -6000000, label = expression("Total flux = 11.8 Tg "~CH[4]~yr^-1 ), size= 3 )+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
-    direction = -1,
-    name = "**CH<sub>4</sub> flux** <br> (g CH<sub>4</sub> m^-2 d<sup>-1</sup>)")+
+    direction = -1, breaks= c(0, 0.2, 0.4),
+    name = "**CH<sub>4</sub> flux** (g CH<sub>4</sub> m^-2 d<sup>-1</sup>)")+
   coord_sf(xlim = c(-15000000, 16000000), ylim = c(-8600000, 8600000), expand = FALSE) +
   guides( fill = guide_colourbar(title.position = "top"))+
-  labs(title = "k capped at 35 m/d")+
+ #labs(title = "k capped")+
   theme_void()+
-  theme(legend.position = c(0.125, 0.35),
-        legend.direction = "vertical",
-        legend.title = ggtext::element_markdown(size = 10),
-        legend.key.height  = unit(.5, 'cm'),
-        legend.key.width =  unit(.3, 'cm'),
-        plot.title = element_text(hjust = .5))
+  theme(legend.position = c(0.5, -0.2),
+        legend.direction = "horizontal",
+        legend.title = ggtext::element_markdown(size = 8),
+        legend.key.height  = unit(.2, 'cm'),
+        legend.key.width =  unit(.65, 'cm'),
+        plot.title = element_text(hjust = .5)) 
+
 
 map_flux_capped <- 
   ggplot()+
@@ -451,20 +533,20 @@ map_flux_capped <-
     aes(fill = Fch4_mean*16/12), color = NA )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   geom_sf(data = mountains, fill = NA, color= "gray50", size= .2)+
-  annotate("text", x = 3000000, y = -6000000, label = expression("Total flux = 14.5 Tg "~CH[4]~yr^-1 ), size= 3 )+
+  #annotate("text", x = 3000000, y = -6000000, label = expression("Total flux = 14.5 Tg "~CH[4]~yr^-1 ), size= 3 )+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
-    direction = -1,
-    name = "**CH<sub>4</sub> flux** <br> (g CH<sub>4</sub> m^-2 d<sup>-1</sup>)")+
+    direction = -1, breaks= c(0, 0.05, 0.1),
+    name = "**CH<sub>4</sub> flux** (g CH<sub>4</sub> m^-2 d<sup>-1</sup>)")+
   coord_sf(xlim = c(-15000000, 16000000), ylim = c(-8600000, 8600000), expand = FALSE) +
   guides( fill = guide_colourbar(title.position = "top"))+
-  labs(title= "Fluxes capped at 2 SD")+
+  #labs(title= "Fluxes capped")+
   theme_void()+
-  theme(legend.position = c(0.125, 0.35),
-        legend.direction = "vertical",
-        legend.title = ggtext::element_markdown(size = 10),
-        legend.key.height  = unit(.5, 'cm'),
-        legend.key.width =  unit(.3, 'cm'),
+  theme(legend.position = c(0.5, -0.2),
+        legend.direction = "horizontal",
+        legend.title = ggtext::element_markdown(size = 8),
+        legend.key.height  = unit(.2, 'cm'),
+        legend.key.width =  unit(.65, 'cm'),
         plot.title = element_text(hjust = .5))
 
 map_uncapped <- 
@@ -474,93 +556,134 @@ map_uncapped <-
     aes(fill = Fch4_mean*16/12), color = NA )+
   geom_sf(data=lakes %>% filter(scalerank < 2), fill="aliceblue", color=NA)+
   geom_sf(data = mountains, fill = NA, color= "gray50", size= .2)+
-  annotate("text", x = 3000000, y = -6000000, label = expression("Total flux = 14.7 Tg "~CH[4]~yr^-1 ), size= 3 )+
+ # annotate("text", x = 3000000, y = -6000000, label = expression("Total flux = 14.7 Tg "~CH[4]~yr^-1 ), size= 3 )+
   scale_fill_viridis_c(
     option = "magma", na.value = "gray",
-    direction = -1,
-    name = "**CH<sub>4</sub> flux** <br> (g CH<sub>4</sub> m^-2 d<sup>-1</sup>)")+
+    direction = -1, breaks= c(0, 0.5, 1),
+    name = "**CH<sub>4</sub> flux** (g CH<sub>4</sub> m^-2 d<sup>-1</sup>)")+
   coord_sf(xlim = c(-15000000, 16000000), ylim = c(-8600000, 8600000), expand = FALSE) +
   guides( fill = guide_colourbar(title.position = "top"))+
-  labs(title= "No correction")+
+  #labs(title= "No correction")+
   theme_void()+
-  theme(legend.position = c(0.125, 0.35),
-        legend.direction = "vertical",
-        legend.title = ggtext::element_markdown(size = 10),
-        legend.key.height  = unit(.5, 'cm'),
-        legend.key.width =  unit(.3, 'cm'),
+  theme(legend.position = c(0.5, -0.2),
+        legend.direction = "horizontal",
+        legend.title = ggtext::element_markdown(size = 8),
+        legend.key.height  = unit(.2, 'cm'),
+        legend.key.width =  unit(.65, 'cm'),
         plot.title = element_text(hjust = .5))
 
 
-maps_fluxes <- map_uncapped + 
-  map_footprint + 
-  map_k_capped + 
-  map_flux_capped +
-  plot_layout(ncol = 2)+
-  plot_annotation(tag_levels = 'a')
 
-ggsave("figures/supplementary/maps_fluxes_comp.png", maps_fluxes, dpi = 800, width = 9, height = 9)
+#now look at how data compares with real obs
+#read file to compare the two methods for upscaling 
+methods_comp <- read_csv("data/processed/methods_flux_comparison.csv") %>% 
+  mutate(method =  as_factor(method) %>% 
+           fct_recode( `Fluxes capped` = "flux_cap", `k capped` = "k_cap",
+                       `Reach footprint correction` = "footprint", Uncorrected = "uncorrected") %>% 
+           fct_relevel("Uncorrected", "k capped", "Fluxes capped", "Reach footprint correction" ))
+
+
+#density plot comparison
+density_uncorrected <- ggplot()+
+  stat_density_2d(data= flux_sites %>% filter(CH4mean> 0, Diffusive_CH4_Flux_Mean > 0), 
+                  geom = "polygon", contour = TRUE,
+                  aes(CH4mean, Diffusive_CH4_Flux_Mean, alpha = ..level..), 
+                  breaks = c(0.05, 0.1, 0.25, 0.5, 1, 1.5, 2))+
+  stat_density_2d(data = slice_sample(methods_comp %>% filter(method == "Uncorrected"), n= 5e+6), 
+                  geom = "polygon", aes(x=ch4, y=flux*1000/16, alpha = ..level..),
+                  breaks = c(0.05, 0.1, 0.25, 0.5, 1, 1.5, 2),
+                  fill = "red4", color= "brown", linewidth = .1)+
+  scale_x_log10()+
+  scale_y_log10(labels = scales::number)+
+  labs(x= "", y = "")+
+  facet_wrap(~method)+
+  theme_bw()+
+  theme(legend.position =  "none",
+        axis.text = element_text(size= 8),
+        strip.background = element_blank(),
+        strip.text = element_text(size=10, face = "bold"))
+
+density_flux <- ggplot()+
+  stat_density_2d(data= flux_sites %>% filter(CH4mean> 0, Diffusive_CH4_Flux_Mean > 0), 
+                  geom = "polygon", contour = TRUE,
+                  aes(CH4mean, Diffusive_CH4_Flux_Mean, alpha = ..level..), 
+                  breaks = c(0.05, 0.1, 0.25, 0.5, 1, 1.5, 2))+
+  stat_density_2d(data = slice_sample(methods_comp %>% filter(method == "Fluxes capped"), n= 5e+6), 
+                  geom = "polygon", aes(x=ch4, y=flux*1000/16, alpha = ..level..),
+                  breaks = c(0.05, 0.1, 0.25, 0.5, 1, 1.5, 2),
+                  fill = "red4", color= "brown", linewidth = .1)+
+  scale_x_log10()+
+  scale_y_log10(labels = scales::number)+
+  facet_wrap(~method)+
+  labs(x= "",  y = "CH<sub>4</sub> flux (mmol m^-2 d<sup>-1</sup>)")+
+  theme_bw()+
+  theme(legend.position =  "none",
+        axis.text = element_text(size= 8),
+        axis.title.y = element_markdown(size=9, hjust=-3.5),
+        strip.background = element_blank(),
+        strip.text = element_text(size=10, face = "bold"))
+
+density_k <- ggplot()+
+  stat_density_2d(data= flux_sites %>% filter(CH4mean> 0, Diffusive_CH4_Flux_Mean > 0), 
+                  geom = "polygon", contour = TRUE,
+                  aes(CH4mean, Diffusive_CH4_Flux_Mean, alpha = ..level..), 
+                  breaks = c(0.05, 0.1, 0.25, 0.5, 1, 1.5, 2))+
+  stat_density_2d(data = slice_sample(methods_comp %>% filter(method == "k capped"), n= 5e+6), 
+                  geom = "polygon", aes(x=ch4, y=flux*1000/16, alpha = ..level..),
+                  breaks = c(0.05, 0.1, 0.25, 0.5, 1, 1.5, 2),
+                  fill = "red4", color= "brown", linewidth = .1)+
+  scale_x_log10()+
+  scale_y_log10(labels = scales::number)+
+  facet_wrap(~method)+
+  labs(x= "",  y = "")+
+  theme_bw()+
+  theme(legend.position =  "none",
+        axis.text = element_text(size= 8),
+        axis.title.y = element_markdown(size=9, hjust=3.5),
+        strip.background = element_blank(),
+        strip.text = element_text(size=10, face = "bold"))
+
+density_footprint <- ggplot()+
+  stat_density_2d(data= flux_sites %>% filter(CH4mean> 0, Diffusive_CH4_Flux_Mean > 0), 
+                  geom = "polygon", contour = TRUE,
+                  aes(CH4mean, Diffusive_CH4_Flux_Mean, alpha = ..level..), 
+                  breaks = c(0.05, 0.1, 0.25, 0.5, 1, 1.5, 2))+
+  stat_density_2d(data = slice_sample(methods_comp %>% filter(method == "Reach footprint correction"), n= 5e+6), 
+                  geom = "polygon", aes(x=ch4, y=flux*1000/16, alpha = ..level..),
+                  breaks = c(0.05, 0.1, 0.25, 0.5, 1, 1.5, 2),
+                  fill = "red4", color= "brown", linewidth = .1)+
+  scale_x_log10()+
+  scale_y_log10(labels = scales::number)+
+  facet_wrap(~method)+
+  labs(x="CH<sub>4</sub> concentration (mmol m<sup>-3</sup>)", y="",
+       caption = "Grey contours are empirical data from GRiMeDB")+
+  theme_bw()+
+  theme(legend.position =  "none",
+        axis.text = element_text(size= 8),
+        axis.title.x = element_markdown(size=9),
+        strip.background = element_blank(),
+        strip.text = element_text(size=10, face = "bold"))
+
+
+
+
+
+
+plot_corrections <- density_uncorrected + map_uncapped +
+  density_k + map_k_capped +
+  density_flux + map_flux_capped + 
+  density_footprint + map_footprint + 
+  plot_layout(ncol = 2, widths = 1) +
+  plot_annotation(tag_levels = 'a') & 
+  theme(plot.tag.position = c(0.07, .93))
+
+
+
+
+ggsave("figures/supplementary/extended_data5.jpeg", plot_corrections,  width = 150, height = 200, dpi = 500, units = "mm")
+
 
 # Comparison of the modelled fluxes with measured fluxes in GRiMeDB data ----
-
-# Function to calculate gas saturation, 
-# from temperature ( in Kelvin) and atm pressure (derived from elevation (in m.a.s.l) for CH4 
-# Henry's Law constants from http://www.henrys-law.org
-# Temperature correction using van't Hoff equation , temperature is in (Kelvin)
-# Kh is in ("Kh, cp") = (mol/L/Atm) at STP
-# Concentrations (mole fraction, also ppmv) in the atmosphere are approximate for 2013, should be updated over time
-# AtmP is in (atmospheres)
-get_Ch4eq <- function(temperature, elevation){
-  
-  pressure <- (1-(.0000225577*elevation))^5.25588
-  Kh <- (1.4*10^-3)*exp(1700*((1/temperature)-(1/298)))
-  AtmosphereConc <-  1.83
-  EquilSaturation <- AtmosphereConc*Kh*pressure #umol/L, mmol/m3
-  
-  return(EquilSaturation)
-}
-
-# get the modelled k values 
-# load file with discharge and k data 
-hydro_k <- read_csv("data/processed/q_and_k.csv") %>% 
-  dplyr::select(COMID, Slope, ends_with("k")) %>% 
-  mutate( k_mean = rowMeans(pick(ends_with("k")), na.rm = TRUE))
-
-#do average methane fluxes rates
-meth_avg <- meth_gis %>% 
-  left_join(hydro_k %>%  dplyr::select(COMID, Slope, k_mean), by = "COMID") %>% 
-  drop_na(Jan_ch4F) %>% 
-  mutate(Fch4_mean = rowMeans(pick(ends_with("ch4F")), na.rm = TRUE)) %>% 
-  dplyr::select(COMID, Slope, k_mean, Fch4_mean )
-
-
-## Now get GRiMeDB 
-load(file.path("data", "GRiMeDB.rda"))
-
-sites_df <- sites_df %>% 
-  mutate(Channel_type = ifelse(is.na(Channel_type) == TRUE, "normal", Channel_type)) 
-
-grime_comids <- read_csv("data/processed/sites_meth_comid.csv") 
-
-
-# join the flux with concentration and the site dataset, also calcute some variables we need for the temperature dependence
-# for that we need the boltzmann constant
-
-boltzmann_k <- 8.62e-5
-
-flux_sites <- flux_df %>% 
-  left_join( conc_df, by=c("Site_ID", "Date_start"), multiple = "all") %>% 
-  left_join( sites_df, by="Site_ID") %>% 
-  filter(Aggregated == "No", WaterTemp_degC < 100, 
-         !Channel_type %in% c("DD","GT", "PS", "TH","Th", "CAN")) %>%
-  mutate(WaterTemp_best = ifelse(is.na(WaterTemp_degC) == TRUE, WaterTemp_degC_estimated, WaterTemp_degC) ) %>% 
-  drop_na(Diffusive_CH4_Flux_Mean, WaterTemp_best ) %>% 
-  mutate(site_lat = paste("Site:",Site_ID,"\nLat: " , round(Latitude,1), sep=""), #make a new variables that has site id and latitude
-         temp_inv = 1/(boltzmann_k*(WaterTemp_best + 273.15)), #inverse of temperature with boltzmann constant
-         temp_stand = 1/(boltzmann_k*288.15) - 1/(boltzmann_k*(WaterTemp_best + 273.15)))  #and the same but standrdadized at 15 degC which keeps things more straight
-
-#sort by latitude for later plots
-flux_sites$site_lat <- reorder(flux_sites$site_lat, desc(flux_sites$Latitude))
-
 # Process all files ----
 sites_clean <- sites_df %>% 
   left_join(grime_comids, by="Site_ID") %>% 
@@ -650,7 +773,6 @@ flux_comp <- flux_comid %>%
             k_Method = first(k_Method)) %>% 
   filter( !k_Method %in% c("not determined", "other"), flux_pred > 0, flux_obs > 0) #remove negative fluxes and strange methods for k
 
-flux_comp %>% group_by(k_Method) %>% summarise(n=n())
 
 # Figure to compare modelled fluxes with measured methane fluxes. This is all values
 plot_overall <- ggplot(data= flux_comp,
@@ -696,9 +818,9 @@ plot_zoomed <- ggplot(data= flux_comp %>%
 plot_overall + 
   plot_zoomed +
   plot_annotation(tag_levels = 'a') & 
-  theme(plot.tag.position = c(0.1, 1), plot.tag = element_text(size=15))
+  theme(plot.tag.position = c(0.05, 1), plot.tag = element_text(size=15))
 
-ggsave("figures/supplementary/flux_comp_similark.png", width = 9, height = 4)
+ggsave("figures/supplementary/extended_data9.jpeg", width = 180, height = 80, units = "mm", scale= 1.4)
 
 
 
@@ -798,7 +920,8 @@ plot_sites +
   theme( plot.tag = element_text(size = 15))
 
 
-ggsave("figures/temperature_methane_rivers.png", width = 5, height = 7.5)
+#ggsave("figures/temperature_methane_rivers.png", width = 5, height = 7.5)
+ggsave("figures/figure4.pdf", width = 89, height = 133, units = "mm", scale= 1.45)
 
 Em_all %>% 
   filter(term == "temp_inv") %>% 
@@ -864,7 +987,7 @@ ebullition_temp <- flux_sites %>%
   theme_classic()+
   theme(axis.title.y = ggtext::element_markdown(), legend.position = "right")
 
-ggsave("figures/supplementary/ebullition_temp.png", ebullition_temp,  scale = .7)
+ggsave("figures/supplementary/extended_data6.jpeg", ebullition_temp,  scale = .55)
 
 
 ## Temperature dependence of ebullition and across river size ----
@@ -948,47 +1071,12 @@ density_comp_plot +
   plot_annotation(tag_levels = 'a') & 
   theme(plot.tag.position = c(0.1, 1), plot.tag = element_text(size=15))
 
-ggsave("figures/supplementary/ebullition_diffusion.png", width = 9, height = 4)
+ggsave("figures/supplementary/extended_data7.jpeg", width = 9, height = 4)
 
 
-## Figure about the footprint correction of the flux rates -----
-#read file to compare the two methods for upscaling 
-methods_comp <- read_csv("data/processed/methods_flux_comparison.csv") %>% 
-  mutate(method =  as_factor(method) %>% 
-           fct_recode( `Fluxes capped` = "flux_cap", `k capped` = "k_cap",
-                       `Reach footprint correction` = "footprint", Uncorrected = "uncorrected") %>% 
-           fct_relevel("Uncorrected", "k capped", "Fluxes capped", "Reach footprint correction" ))
 
 
-#density plot comparison
-ggplot()+
-  stat_density_2d(data= flux_sites %>% filter(CH4mean> 0, Diffusive_CH4_Flux_Mean > 0), 
-                  geom = "polygon", contour = TRUE,
-                  aes(CH4mean, Diffusive_CH4_Flux_Mean, alpha = ..level..), 
-                  breaks = c(0.05, 0.1, 0.25, 0.5, 1, 1.5, 2))+
-  stat_density_2d(data = slice_sample(methods_comp, n= 5e+5), 
-                  geom = "polygon", aes(x=ch4, y=flux*1000/16, alpha = ..level..),
-                  breaks = c(0.05, 0.1, 0.25, 0.5, 1, 1.5, 2),
-                  fill = "red4", color= "brown", size = .1)+
-  scale_x_log10()+
-  scale_y_log10(labels = scales::number)+
-  facet_wrap(~method)+
-  labs(x="CH<sub>4</sub> concentration <br> (mmol m^-3)", 
-       y = "CH<sub>4</sub> flux <br> (mmol m^-2 d<sup>-1</sup>)",
-       caption = "Grey contours are empirical data from GRiMeDB")+
-  theme_bw()+
-  theme(legend.position =  "none",
-        axis.title.x = element_markdown(),
-        axis.title.y = element_markdown(),
-        strip.background = element_blank(),
-        strip.text = element_text(size=12, face = "bold"))
 
-ggsave("figures/supplementary/flux_corrections_density.png", width = 8, height = 7)
-
-
-methods_comp %>% 
-  group_by(method) %>% 
-  summarise(flux = mean(flux*1000/16, na.rm = TRUE))
 
 ## Figure about the uncertainity and sensitivity analysis -----
 ## Also calculate the uncertianity on the ebullition estimate
@@ -1077,7 +1165,7 @@ vals_all %>%
   theme(legend.position = "top", axis.text.y = ggtext::element_markdown(size= 11, hjust = 0),
         axis.title.x = ggtext::element_markdown())
 
-ggsave("figures/supplementary/sensitivity.png", scale= .8)
+ggsave("figures/supplementary/extended_data8.jpeg", scale= .6)
 
 
 
@@ -1115,7 +1203,7 @@ ggsave("figures/supplementary/sites_with_many_obs2.png")
 
  
 
-## figures review
+## figures done for the review process.
 
 conc_sites_df <- grime_comids %>% 
   left_join(sites_df) %>% 
@@ -1153,8 +1241,8 @@ plot_concs <- conc_sites_df %>%
 plot_dist / plot_concs
 
 
-#temperature dependence across orders
-#reformot our data and put together withthe other aquatic systems
+#temperature dependence across orders 
+#reformot our data and put together with the other aquatic systems
 data_for_Em <- flux_sites  %>% 
   left_join(grime_comids %>% select(Site_ID, order)) %>%
   drop_na(order) %>% 

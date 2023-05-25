@@ -47,22 +47,20 @@ grimeDB_attributes <- read_csv("data/processed/grimeDB_concs_with_grade_attribut
 colnames(grimeDB_attributes)
 
 # file to have nicer names in the variables, to use later
-labeller_vars <- read_csv("data/processed/variables_names.csv") %>% 
-  mutate(label=str_replace(label, "9", ";"))
+labeller_vars <- read_csv("data/processed/variables_names.csv") 
 
 # 2. Explore the raw data and process before the modelling ----
 
 # we will log transform those to start with
 vars_to_log <- c('CH4mean','uparea','popdens','slop' ,'T_OC','S_OC', 'T_CACO3', 'T_CASO4', 'k_month', 'gw_month', 'wetland', 
-                 'T_ESP',"N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture", "q_month",
+                 'T_ESP', "N_groundwater_agri", "N_groundwater_nat", "N_deposition_water", "P_aquaculture", "q_month",
                  "P_gnpp", "P_background", "P_load", "P_point", "P_surface_runoff_agri", "P_surface_runoff_nat", "N_retention_subgrid")
 
 # Select useful variables for the model, some variables were removed due to a high correlation with other ones 
-variables_to_remove <- c('Site_ID','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",  "S_PH_H2O",
-                         'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY', "lon", "lat",  "S_TEB" ,
-                         'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY", "T_CEC_SOIL",
+variables_to_remove <- c('Site_ID','COMID','GPP_yr', 'Log_S_OC', 'T_PH_H2O', 'S_CEC_SOIL', 'T_BS', 'T_TEB', 'pyearRA', "pyearRH",
+                         'npp_month', 'forest', 'S_SILT', 'S_CLAY', 'S_CEC_CLAY', 'S_REF_BULK_DENSITY', 'S_BULK_DENSITY', "lon", "lat",
+                         'S_CASO4', 'S_CASO4', "S_GRAVEL", "S_CACO3" , "S_ESP", "S_SAND", "T_REF_BULK_DENSITY", "T_CEC_CLAY",
                          "N_aquaculture", "N_gnpp", "N_load", "N_point",  "N_surface_runoff_agri", "N_surface_runoff_nat" )
-
 
 #dataset with some variables log transformed
 grimeDB_attr_trans <- grimeDB_attributes %>%
@@ -70,6 +68,7 @@ grimeDB_attr_trans <- grimeDB_attributes %>%
   rename_with( ~ str_c("Log_", vars_to_log), .cols = all_of(vars_to_log) ) #rename the log transformed variable
 
 # 2. Assess a bit the variables and their correlations ----
+
 #Do  some histograms with the log transformed variables
 # some variables are still very skewed, usually the anthropogenic predictors that have lots of 0s
 grimeDB_attr_trans %>% 
@@ -123,8 +122,6 @@ vars_for_plot <- corr_ch4 %>%
   scale_fill_continuous(type = "viridis", trans = "log10")+
   facet_wrap(~predictor, scales='free')
 
- 
-ggsave(filename = "figures/supplementary/correlations.png", plot = plot_correlations, width = 18, height = 12)
 
 # 3.  Ml models using tidymodels ----
 
@@ -508,7 +505,6 @@ labelled_months <- tibble(month_label = tolower(month.abb), labels = month.name)
 
 #extract the model prediction data for plotting model performance
 monthly_models_unnested <- monthly_models %>% 
-  mutate(month_label = fct_relevel(month_label, levels = toupper(month.abb))) %>% 
   unnest(preds)  %>% 
   pivot_longer(rf_pred:xgboost_pred, values_to = "prediction", names_to = "model") %>% 
   left_join(labelled_months, by = "month_label") %>% 
@@ -535,7 +531,7 @@ table_out <- rms_text %>%
   select(labels, algorithm, text) %>% 
   pivot_wider(names_from = labels, values_from = text) 
 
-# let's look at the table of model comparison, I used this during the review process.
+# let's look at the table of model comparison, which is table S4 in the SM
 table_out
 
 table_out %>% 
