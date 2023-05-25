@@ -6,6 +6,8 @@ This repository contains the code to process raw files, model CH4 concentrations
 First and corresponding author is me so you can contact for questions (g.rocher.ros at gmail dot com).
 
 # Setup
+This is all in R so you need ot know some R and have it installed, together with Rstudio. Specific packages are installed within each script if needed.
+
 First you need to download the data files and datasets used in this study. For the `main analysis`section, the files are deposited in [ZENODO](https://doi.org/10.5281/zenodo.7733604)
 You should place those files in the folder `data/processed` for the main analysis. 
 If you want to run all the steps from scratch, that is the pre-processing of GIS files, you will need to ask me for all the raw files as they are quite heavy. 
