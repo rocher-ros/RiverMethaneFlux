@@ -1,28 +1,18 @@
 # Global estimate of Riverine Methane Flux
 
-Project that quantifies CH4 emissions from rivers globally and monthly. This repository contains the code to process raw file, model CH4 concentrations and estimate CH4 emissions from rivers, as well as to produce the acompanying figures. The manuscript associated to this project is currently in preparation.
+In this project we quantify and undertsand global CH4 emissions from rivers. The analysis in this repository is associated to a manuscript currently in minor revisions.
+This repository contains the code to process raw files, model CH4 concentrations and estimate CH4 emissions from rivers, as well as to produce the acompanying figures of the manuscript. T
 Main and corresponding author is Gerard Rocher-Ros (g.rocher.ros@gmail.com), which you can contact for questions.
 
-## Setup
-Currently the datasets are private, so you need access to run the code in this repository. If you have access to the datasets, they should be placed in `data/processed` for the main analysis, if you want to run all the steps from scratch you will need to ask me for all the raw files as they are quite heavy. In the `data/` folder, there should also be the Global River Methane Database currently in review in ESSD and publicly available at [EDI](https://doi.org/10.6073/pasta/b7d1fba4f9a3e365c9861ac3b58b4a90).
+# Setup
+First you need to download the data files and datasets used in this study. For the `main analysis`section, the files are deposited in [ZENODO](https://doi.org/10.5281/zenodo.7733604)
+You should place those files in the folder `data/processed` for the main analysis. 
+If you want to run all the steps from scratch, that is the pre-processing of GIS files, you will need to ask me for all the raw files as they are quite heavy. 
+You will also need the Global River Methane Database (Stanley et al. 2023). The data paper is currently accepted in [ESSD](https://essd.copernicus.org/preprints/essd-2022-346/) and the database is publicly available at [EDI](https://doi.org/10.6073/pasta/b7d1fba4f9a3e365c9861ac3b58b4a90).
 
-Code is in the `code/` folder, with two categories: 
-- Folder `preprocessing/` for all the GIS processing to obtain all spatial predictors for the GRADES River network. This analysis requires many large files and will be available by request.
-- Folder `main analysis/` to reproduce the modelling, main results an figures in the paper.
-
-======
-
-# Global estimate of Riverine Methane Flux
-
-Project that quantifies CH4 emissions from rivers globally and monthly. This repository contains the code to process raw file, model CH4 concentrations and estimate CH4 emissions from rivers, as well as to produce the acompanying figures. The manuscript associated to this project is currently in preparation.
-Main and corresponding author is Gerard Rocher-Ros (g.rocher.ros@gmail.com), which you can contact for questions.
-
-## Setup
-Currently the datasets are private, so you need access to run the code in this repository. If you have access to the datasets, they should be placed in `data/processed` for the main analysis, if you want to run all the steps from scratch you will need to ask me for all the raw files as they are quite heavy. In the `data/` folder, there should also be the Global River Methane Database currently in review in ESSD and publicly available at [EDI](https://doi.org/10.6073/pasta/b7d1fba4f9a3e365c9861ac3b58b4a90).
-
-Code is in the `code/` folder, with two categories: 
-- Folder `preprocessing/` for all the GIS processing to obtain all spatial predictors for the GRADES River network. This analysis requires many large files and will be available by request.
-- Folder `main analysis/` to reproduce the modelling, main results an figures in the paper.
+Code to run this analysis is in the `code/` folder, placed in two major directories: 
+- Folder `preprocessing/` contains all the scripts for the GIS processing to obtain all spatial predictors for the GRADES River network. 
+- Folder `main analysis/` contains all the scripts to reproduce the random-forest modelling, upscaling procedures, GIS post-processing, main results and figures in the paper.
 
 ## Preprocessing
 The folder `preprocessing/` contains four scripts that do the following:
