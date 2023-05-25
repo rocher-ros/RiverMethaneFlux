@@ -1,8 +1,8 @@
 # Global estimate of Riverine Methane Flux
 
 In this project we quantify and undertsand global CH4 emissions from rivers. The analysis in this repository is associated to a manuscript currently in minor revisions.
-This repository contains the code to process raw files, model CH4 concentrations and estimate CH4 emissions from rivers, as well as to produce the acompanying figures of the manuscript. T
-Main and corresponding author is Gerard Rocher-Ros (g.rocher.ros@gmail.com), which you can contact for questions.
+This repository contains the code to process raw files, model CH4 concentrations and estimate CH4 emissions from rivers, as well as to produce the acompanying figures of the manuscript.
+First and corresponding author is me so you can contact for questions (g.rocher.ros at gmail dot com).
 
 # Setup
 First you need to download the data files and datasets used in this study. For the `main analysis`section, the files are deposited in [ZENODO](https://doi.org/10.5281/zenodo.7733604)
@@ -13,6 +13,8 @@ You will also need the Global River Methane Database (Stanley et al. 2023). The 
 Code to run this analysis is in the `code/` folder, placed in two major directories: 
 - Folder `preprocessing/` contains all the scripts for the GIS processing to obtain all spatial predictors for the GRADES River network. 
 - Folder `main analysis/` contains all the scripts to reproduce the random-forest modelling, upscaling procedures, GIS post-processing, main results and figures in the paper.
+
+Hardware used: I tested this on windows 10 and macOS Catalina (10.15). Most parts run fine in a decent laptop, but the scripts `4_CH4_model_predict.R`, `5_CH4_upscaling.R`, `6_CH4_upscaling_uncertainty.R` and `7_GIS_processing.R` have been on the limit with a MacBook pro M1max and 64 GB of RAM, so beware on the memory side.
 
 ## Preprocessing
 The folder `preprocessing/` contains four scripts that do the following:
