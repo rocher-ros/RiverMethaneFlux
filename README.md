@@ -1,4 +1,5 @@
-# Global estimate of Riverine Methane Flux
+# Global methane emissions from rivers and streams
+
 
 In this project we quantify and undertsand global CH4 emissions from rivers. The analysis in this repository is associated to a manuscript currently in minor revisions.
 This repository contains the code to process raw files, model CH4 concentrations and estimate CH4 emissions from rivers, as well as to produce the acompanying figures of the manuscript.
